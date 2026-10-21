@@ -15,6 +15,13 @@
       "when": 1792603608930,
       "tag": "0001_lively_doomsday",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792621331738,
+      "tag": "0002_household",
+      "breakpoints": true
     }
   ]
 }
