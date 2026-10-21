@@ -1,38 +1,40 @@
-# PrivéFinances - piloto privado v0.2
+# PrivéFinances — piloto privado v0.3
 
-**Votre App Financière**. Identidade com coruja, azul-marinho, verde-petróleo e menta.
+**Votre App Financière**. Foco inicial: impostos, assurances e prévoyance, em português e francês.
 
-## Serviços disponíveis para teste
+## Disponível para teste com dados fictícios
 
-- Perfil e orçamento mensal com saldo atualizado durante o preenchimento.
-- Exemplo fictício que preenche e guarda um orçamento de demonstração.
-- Histórico da última simulação e restauração do perfil ao voltar ao app.
-- Arquivo de imagens de comprovantes, preenchimento manual, confirmação, download e exclusão.
-- Agenda pessoal consultável no app, sem envio externo.
-- Exportação XLSX e JSON e exclusão do espaço de teste.
-- Interface PT/FR, manifesto e service worker PWA; somente o shell é armazenado em cache.
+- Orçamento detalhado: salário líquido, rendas extras, despesas por categoria, provisões anuais e lançamentos pontuais por mês. Saldo instantâneo, persistência cifrada e exportação Excel/JSON.
+- Comprovantes com confirmação: arquivo por credor e por ano fiscal, agenda geral de pagamentos, vencimento e situação. Um documento tem duas vistas sem duplicar o valor no orçamento. Pasta fiscal indica análise pendente, não dedução aprovada.
+- Ficha salarial confirmada pode substituir explicitamente o salário-base líquido. Importações repetidas não somam o mesmo salário.
+- Guia de referência PT/FR para funcionalidades e temas selecionados de fontes oficiais suíças. Adaptador de IA preparado, mas desativado sem provedor/configuração e consentimento específico.
+- Guia de economia determinístico: compara preços alternativos fornecidos pelo usuário, custos de troca e prioridades de revisão. Sem cotações de mercado, recomendações personalizadas por IA ou cancelamentos automáticos.
+- Parcelas: equivalente mensal de prêmio de seguro, contribuições de prévoyance sem retorno projetado, amortização de crédito e leasing com residual hipotético. Sem oferta comercial, taxa efetiva regulatória, aprovação de crédito ou economia fiscal prometida.
+- Centro de revisões semanais e mensais, agenda pessoal, exclusão de documentos e conta de teste.
+- PWA PT/FR com cache apenas do shell; dados financeiros e API não ficam no cache offline.
 
-O piloto é privado e usa a identidade de visitante fornecida pelo Sites. Registros estruturados são guardados em D1 e documentos em R2, cifrados com AES-256-GCM e contexto por usuário/recurso. Os segredos ficam na configuração de execução, nunca no repositório.
+## Limites do piloto
 
-**Usar apenas dados e documentos fictícios.** O provisionamento do piloto não comprova residência integral de dados/processamento na Europa. A localização e as condições de tratamento precisam de verificação contratual antes de dados reais.
+Usar **apenas dados e documentos fictícios**. Impostos reais e deduções continuam bloqueados: tabelas anuais em rascunho aguardam homologação profissional. OCR, geração por IA, Stripe, envio de alertas e encaminhamento a parceiros não estão ativos. A organização automática ocorre depois de identificar/preencher os campos; a extração da imagem exige ativação do provedor. Não há detecção entre duas fotos diferentes da mesma fatura.
 
-## Recursos que continuam desativados
+A revisão semanal/mensal é manutenção editorial e técnica. Datas previstas não comprovam execução, nem aprovam leis automaticamente. Ver `docs/MAINTENANCE.md`. Não há atualização contínua de cotações ou sincronização bancária.
 
-Impostos reais/deduções, OCR externo, pagamentos, envios de e-mail/push/WhatsApp e encaminhamento a parceiros. Não há cobrança, promessa de economia fiscal ou transmissão de imagens à IA neste piloto. A agenda não executa alertas externos.
+## Arquitetura e privacidade
 
-O motor fiscal e os adaptadores permanecem no código para as próximas fases. As tabelas anuais estão em rascunho. A passagem para produção exige homologação fiscal/jurídica, fluxos comerciais completos, configuração operacional e testes com provedores reais.
+Cloudflare Workers, D1 e R2. Dados estruturados e arquivos cifrados com AES-256-GCM, associados ao usuário e ao recurso. Pastas são vistas lógicas sobre o mesmo arquivo; caminhos físicos opacos. Chaves de execução nunca vão ao Git. A identidade Sites só é aceita no adaptador atrás do despacho autenticado da plataforma. Para Cloudflare próprio, usar Access JWT e origem configurada.
 
-## Arquitetura
+O provisionamento atual **não comprova residência integral na Europa**; localização e condições contratuais dos provedores precisam ser verificadas antes de dados reais.
 
-- `public/`: interface HTML/CSS/JS, PWA, logo e exportador XLSX.
-- `src/`: núcleo Workers, regras, criptografia, identidade e integrações.
-- `app/route.ts`: entrega do HTML; `app/api/[...path]/route.ts`: adaptação da API ao ambiente Sites.
-- `db/schema.ts` e `drizzle/`: esquema e migrações de produção, gerados com Drizzle.
-- `migrations/`: esquema SQLite de referência dos testes do núcleo e seed de teste; não é o diretório de migração da implantação Sites.
-- `rules/`: tabelas anuais rastreáveis. O seed controlado de rascunhos é feito fora das migrações de schema.
-- `tests/`: regras, segurança, API, isolamento, agenda, armazenamento e exportação.
+- `public/`: interface, identidade visual, PWA, exportador XLSX.
+- `src/organizer.mjs`: cálculo do orçamento, economia e parcelas.
+- `src/organizer-routes.mjs`: plano cifrado, arquivo e agenda documental.
+- `src/guide.mjs`: referências datadas e adaptador de IA com limites de fontes.
+- `src/worker.mjs`: API autenticada, regras, consentimentos e integrações.
+- `db/schema.ts`, `drizzle/`: esquema e migrações de produção.
+- `migrations/`: esquema SQLite dos testes; não aplicar na hospedagem Sites.
+- `rules/`: regras anuais versionadas. Rascunhos não geram imposto devido.
 
-## Desenvolvimento e validação
+## Validação
 
 ```sh
 npm run check
@@ -40,12 +42,8 @@ npm test
 npm run build
 ```
 
-A instalação usa `pnpm-lock.yaml` e o package manager declarado. Preserve as integrações e scripts do starter Sites. A rota que aceita identidade `oai-authenticated-user-*` é exclusiva de hospedagem atrás do despacho autenticado Sites. Não publicar esse adaptador diretamente em uma origem aberta; na migração para Cloudflare próprio, usar a validação Access JWT do núcleo e configurar o domínio correto.
+37 testes JavaScript, validação Python de SQLite/XLSX e paridade entre schema de produção e fixtures. Incluem orçamento anual/pontual, parcelas, vencimento de fontes, consentimento de IA, isolamento de usuários, cifragem, arquivo idempotente por documento, salário sem duplicação e exclusão em cascata. A sessão de navegador local não possui identidade Sites: a gravação é verificada por testes da API, não por um login local. Instalação em celulares e aceite no endereço privado ainda precisam de teste em dispositivos reais.
 
-`DATA_KEYS`, `ACTIVE_DATA_KEY`, `APP_ORIGIN`, `PRIVACY_VERSION` e flags são configuração de execução. Arquivos `.dev.vars*` locais são ignorados. Não copiar chaves de teste para produção. A migração inicial de produção contém apenas schema; dados fiscais em rascunho são inseridos de forma controlada quando consultados.
+Segredos e flags: `DATA_KEYS`, `ACTIVE_DATA_KEY`, `APP_ORIGIN`, `PRIVACY_VERSION`; `AI_ENABLED` para OCR, `GUIDE_AI_ENABLED` para guia, ambos também exigem `ANTHROPIC_API_KEY` e `ANTHROPIC_MODEL`. Manter falsos até configurar contrato, custos, tratamento de dados e testes do provedor. Arquivos `.dev.vars*` são ignorados.
 
-## Verificação desta versão
-
-29 testes JavaScript e verificações Python de SQLite e XLSX passaram. Build para Workers realizado. Revisão visual local confirmou a identidade e o saldo instantâneo com valores fictícios. A sessão de revisão local não tem identidade de visitante do Sites, portanto o caminho de gravação não foi confirmado por essa sessão de navegador; a API e a separação entre usuários foram testadas automatizadamente. Teste de instalação em dispositivos reais e aceite de usuário no endereço privado continuam necessários.
-
-O endereço do piloto e o vínculo de fonte são geridos pelo manifesto `.openai/hosting.json`. O repositório GitHub próprio do usuário será conectado quando estiver disponível.
+Repositório: https://github.com/AmigoLionXP/privefinances
