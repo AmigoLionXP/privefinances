@@ -1,0 +1,16 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE users (id TEXT PRIMARY KEY, identity_cipher TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, deleting INTEGER NOT NULL DEFAULT 0 CHECK(deleting IN(0,1)));
+CREATE TABLE rulesets (id TEXT PRIMARY KEY, tax_year INTEGER NOT NULL, canton TEXT NOT NULL CHECK(canton='VD'), version TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('draft','approved','retired')), payload TEXT NOT NULL CHECK(json_valid(payload)), sha256 TEXT NOT NULL, UNIQUE(tax_year,version));
+CREATE UNIQUE INDEX one_approved_year ON rulesets(tax_year,canton) WHERE status='approved';
+CREATE TABLE profiles (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, payload TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE simulations (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, ruleset_id TEXT REFERENCES rulesets(id), ruleset_hash TEXT, payload TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX simulations_owner ON simulations(user_id,created_at);
+CREATE TABLE receipts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, object_key TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, confirmed INTEGER NOT NULL DEFAULT 0 CHECK(confirmed IN(0,1)), created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX receipts_owner ON receipts(user_id);
+CREATE TABLE consents (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, purpose TEXT NOT NULL, vertical TEXT NOT NULL, version TEXT NOT NULL, granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, revoked_at TEXT);
+CREATE TABLE leads (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, consent_id TEXT NOT NULL REFERENCES consents(id), vertical TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN('pending','sending','sent','cancelled')), attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE reminders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, payload TEXT NOT NULL, due_at TEXT NOT NULL, channel TEXT NOT NULL CHECK(channel IN('email','push','whatsapp')), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN('pending','sending','sent','cancelled')), attempts INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE checkouts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, product TEXT NOT NULL CHECK(product IN('pack','review','subscription')), stripe_id TEXT UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE billing_events (id TEXT PRIMARY KEY, type TEXT NOT NULL, received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE entitlements (checkout_id TEXT PRIMARY KEY REFERENCES checkouts(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, product TEXT NOT NULL, status TEXT NOT NULL, subscription_id TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires INTEGER NOT NULL);

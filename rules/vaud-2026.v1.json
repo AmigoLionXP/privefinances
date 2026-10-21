@@ -1,0 +1,81 @@
+{
+  "id": "VD-2026-v1",
+  "canton": "VD",
+  "taxYear": 2026,
+  "version": "1.0.0",
+  "status": "draft",
+  "review": {
+    "reviewer": null,
+    "reference": null,
+    "approvedAt": null,
+    "validUntil": null
+  },
+  "sources": [
+    {
+      "url": "https://www.bsv.admin.ch/fr/votre-cotisation-au-3e-pilier",
+      "checkedAt": "2026-10-21",
+      "topic": "3a"
+    },
+    {
+      "url": "https://www.vd.ch/etat-droit-finances/impots/impots-pour-les-individus/demander-un-delai-pour-deposer-ma-declaration-dimpot",
+      "checkedAt": "2026-10-21",
+      "topic": "deadlines"
+    }
+  ],
+  "pillar3a": {
+    "withPensionCap": 725800,
+    "withoutPensionCap": 3628800,
+    "withoutPensionBps": 2000,
+    "catchUpSupported": false
+  },
+  "deductions": [
+    {
+      "id": "medical",
+      "category": "medical",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "Thresholds and eligible costs differ between ICC and IFD; reimbursements must be excluded."
+    },
+    {
+      "id": "childcare",
+      "category": "childcare",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "Age, employment, actual costs, ICC/IFD limits and reimbursements require validation."
+    },
+    {
+      "id": "transport",
+      "category": "transport",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "Professional costs, reimbursement and flat-rate alternative must be resolved."
+    },
+    {
+      "id": "training",
+      "category": "training",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "Initial education and continuing professional education differ."
+    },
+    {
+      "id": "pillar3a",
+      "category": "pillar3a",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "Count only the annual certified contribution once."
+    },
+    {
+      "id": "other",
+      "category": "other",
+      "mode": "manual_review",
+      "cap": null,
+      "reason": "A purchase is not automatically deductible."
+    }
+  ],
+  "tariffs": [],
+  "deadlines": [],
+  "notes": [
+    "Do not infer filing deadlines in 2027 from the 2025 calendar. Obtain the annual official directive.",
+    "3a catch-up introduced in 2026 requires a separate validated eligibility model."
+  ]
+}

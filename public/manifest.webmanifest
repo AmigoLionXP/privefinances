@@ -1,0 +1,1 @@
+{"id": "/", "name": "PrivéFinances · Votre App Financière", "short_name": "PrivéFinances", "lang": "fr", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#FFFFFF", "theme_color": "#087F80", "icons": [{"src": "/brand/owl.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any"}]}

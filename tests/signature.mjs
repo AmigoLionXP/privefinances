@@ -1,0 +1,1 @@
+export async function signature(raw,secret,t=Math.floor(Date.now()/1000)){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);const mac=Buffer.from(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(`${t}.${raw}`))).toString('hex');return `t=${t},v1=${mac}`;}
