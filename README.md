@@ -1,49 +1,79 @@
-# PrivéFinances — piloto privado v0.3
+# PrivéFinances — piloto privado v0.4
 
-**Votre App Financière**. Foco inicial: impostos, assurances e prévoyance, em português e francês.
+**Votre App Financière · Seu app financeiro.** Para quem trabalha e empreende na Suíça (piloto: cantão de Vaud), em português, francês e inglês.
 
-## Disponível para teste com dados fictícios
+> Usar **apenas dados e documentos fictícios** no piloto. Nenhuma cobrança real, nenhum pagamento executado, nenhuma publicação em produção.
 
-- Orçamento detalhado: salário líquido, rendas extras, despesas por categoria, provisões anuais e lançamentos pontuais por mês. Saldo instantâneo, persistência cifrada e exportação Excel/JSON.
-- Comprovantes com confirmação: arquivo por credor e por ano fiscal, agenda geral de pagamentos, vencimento e situação. Um documento tem duas vistas sem duplicar o valor no orçamento. Pasta fiscal indica análise pendente, não dedução aprovada.
-- Ficha salarial confirmada pode substituir explicitamente o salário-base líquido. Importações repetidas não somam o mesmo salário.
-- Guia de referência PT/FR para funcionalidades e temas selecionados de fontes oficiais suíças. Adaptador de IA preparado, mas desativado sem provedor/configuração e consentimento específico.
-- Guia de economia determinístico: compara preços alternativos fornecidos pelo usuário, custos de troca e prioridades de revisão. Sem cotações de mercado, recomendações personalizadas por IA ou cancelamentos automáticos.
-- Parcelas: equivalente mensal de prêmio de seguro, contribuições de prévoyance sem retorno projetado, amortização de crédito e leasing com residual hipotético. Sem oferta comercial, taxa efetiva regulatória, aprovação de crédito ou economia fiscal prometida.
-- Centro de revisões semanais e mensais, agenda pessoal, exclusão de documentos e conta de teste.
-- PWA PT/FR com cache apenas do shell; dados financeiros e API não ficam no cache offline.
+## O que o app faz
 
-## Limites do piloto
+| Área | Funções |
+|---|---|
+| Onboarding (7 etapas) | Perfil (comuna, situação, permis, imposto na fonte), rendimentos com 13º, família, despesas com frequências, diagnóstico e plano de economia; salva e retoma |
+| Painel | Disponível no mês, a pagar em 30 dias, menor saldo previsto, projeção diária, vencimentos, alertas, meta, recomendações |
+| Orçamento | Motor em centavos: confirmado × estimado, provisões para contas trimestrais/semestrais/anuais, sem recontar imposto na fonte |
+| Scanner | QR-fatura (SIX v2.3) por foto, imagem, PDF ou texto; leitura no aparelho; revisão obrigatória; duplicados; ligação ao orçamento sem dupla contagem |
+| Documentos | Faturas, recibos, holerites, cartas, contratos; arquivo cifrado; pastas por credor, ano fiscal e análise fiscal; termos como *commandement de payer* |
+| Budget AI | Regras auditáveis: aumentos de custo, recorrentes fora do orçamento, meta, seguros, assinaturas; economia só conta depois de confirmada |
+| Guia Suisse | Base de Vaud versionada (`public/canton-vd.mjs`) com fonte oficial, data de conferência e vigência; sem fonte, não responde de memória |
+| Meu Negócio | Faturas emitidas, despesas, provisões AVS/imposto, alerta de TVA, fluxo de 13 semanas, CSV para o contador |
+| Simulações | Crédito com taxa máxima legal e teste de 36 meses contra o orçamento; parcelas, LAMal, 3a, envio de dinheiro |
+| Soluções | Serviço oficial gratuito → app → comparação → profissionais; parceiros ordenados sem comissão; encaminhamento só com consentimento |
+| Planos | Essencial, Privé Plus, Privé Business (preços = hipóteses); só piloto sem cobrança até autorização |
+| Privacidade | Exportar e excluir conta; consentimentos por finalidade; analytics opcional |
 
-Usar **apenas dados e documentos fictícios**. Impostos reais e deduções continuam bloqueados: tabelas anuais em rascunho aguardam homologação profissional. OCR, geração por IA, Stripe, envio de alertas e encaminhamento a parceiros não estão ativos. A organização automática ocorre depois de identificar/preencher os campos; a extração da imagem exige ativação do provedor. Não há detecção entre duas fotos diferentes da mesma fatura.
+## Arquitetura
 
-A revisão semanal/mensal é manutenção editorial e técnica. Datas previstas não comprovam execução, nem aprovam leis automaticamente. Ver `docs/MAINTENANCE.md`. Não há atualização contínua de cotações ou sincronização bancária.
+Monólito modular: **Worker Cloudflare** (`src/worker.mjs`) + **D1** (SQLite) + **R2** (arquivos), servido pela hospedagem Sites (`app/`). A interface é um PWA sem framework (`public/`). Os motores puros ficam em `public/` e são usados pelo servidor e pelo navegador:
 
-## Arquitetura e privacidade
+| Módulo | Arquivo |
+|---|---|
+| Budget Engine | `public/budget-engine.mjs` |
+| Document Engine (QR-fatura, duplicados, pastas, termos) | `public/qrbill.mjs`, `public/documents.mjs`, `src/documents*.mjs` |
+| Swiss Rules (base de Vaud) | `public/canton-vd.mjs`, `src/guide.mjs` |
+| Negócio e simulações | `public/business-engine.mjs`, `public/simulators.mjs` |
+| Billing (planos/permissões) | `public/plans.mjs`, `src/phase3-routes.mjs` |
+| Partner Service | `public/solutions.mjs`, `src/phase3-routes.mjs` |
+| Analytics, auditoria, plano atual | `src/telemetry.mjs`, `public/experiments.mjs` |
+| Agregado familiar | `src/household*.mjs` |
 
-Cloudflare Workers, D1 e R2. Dados estruturados e arquivos cifrados com AES-256-GCM, associados ao usuário e ao recurso. Pastas são vistas lógicas sobre o mesmo arquivo; caminhos físicos opacos. Chaves de execução nunca vão ao Git. A identidade Sites só é aceita no adaptador atrás do despacho autenticado da plataforma. Para Cloudflare próprio, usar Access JWT e origem configurada.
+Dados pessoais cifrados com AES-256-GCM e contexto ligado ao dono. Migrações: `drizzle/` (produção) e `migrations/` (testes, mesmo esquema verificado por `tests/schema_test.py`). Bibliotecas no navegador: jsQR e pdf.js em `public/vendor/` (Apache-2.0).
 
-O provisionamento atual **não comprova residência integral na Europa**; localização e condições contratuais dos provedores precisam ser verificadas antes de dados reais.
+## Variáveis de ambiente
 
-- `public/`: interface, identidade visual, PWA, exportador XLSX.
-- `src/organizer.mjs`: cálculo do orçamento, economia e parcelas.
-- `src/organizer-routes.mjs`: plano cifrado, arquivo e agenda documental.
-- `src/guide.mjs`: referências datadas e adaptador de IA com limites de fontes.
-- `src/worker.mjs`: API autenticada, regras, consentimentos e integrações.
-- `db/schema.ts`, `drizzle/`: esquema e migrações de produção.
-- `migrations/`: esquema SQLite dos testes; não aplicar na hospedagem Sites.
-- `rules/`: regras anuais versionadas. Rascunhos não geram imposto devido.
+| Variável | Uso |
+|---|---|
+| `DATA_KEYS`, `ACTIVE_DATA_KEY` | Chaves AES (JSON `{id: base64 32 bytes}`) e a chave ativa — obrigatórias |
+| `APP_ORIGIN`, `PRIVACY_VERSION` | Origem aceita em escrita; versão do aviso de privacidade exigida nos consentimentos |
+| `AUTH_MODE` | `sites` na hospedagem Sites; senão Cloudflare Access (`ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`) |
+| `ALLOW_LOCAL_DEV` | `true` só em desenvolvimento local |
+| `ADMIN_EMAILS` | E-mails com acesso a `/api/admin/*` (parceiros e métricas) |
+| `PAYMENTS_ENABLED`, `STRIPE_*` | Cobrança — manter `false` até autorização |
+| `AI_ENABLED`, `GUIDE_AI_ENABLED`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | OCR e IA do guia — manter `false` até contrato, custos e privacidade |
+| `DELIVERY_ENABLED`, `LEAD_API_*`, `NOTIFICATION_API_*` | Entrega de lembretes e contatos — desligado |
+| `SHOW_DEMO_PARTNERS` | Mostra parceiros de demonstração (só testes) |
+| `TODAY_OVERRIDE` | Data fixa para testes |
 
-## Validação
+Arquivos `.dev.vars*` são ignorados pelo Git.
+
+## Executar e testar
 
 ```sh
-npm run check
-npm test
+pnpm install
+npm run check        # sintaxe, traduções FR, regras
+npm test             # 73 testes (motores, API, segurança) + paridade de esquema
 npm run build
+# local: criar dist/server/.dev.vars, aplicar drizzle/*.sql no D1 local e
+npm start            # http://127.0.0.1:8787
 ```
 
-37 testes JavaScript, validação Python de SQLite/XLSX e paridade entre schema de produção e fixtures. Incluem orçamento anual/pontual, parcelas, vencimento de fontes, consentimento de IA, isolamento de usuários, cifragem, arquivo idempotente por documento, salário sem duplicação e exclusão em cascata. A sessão de navegador local não possui identidade Sites: a gravação é verificada por testes da API, não por um login local. Instalação em celulares e aceite no endereço privado ainda precisam de teste em dispositivos reais.
+Testes de navegador (Playwright) foram executados contra o Worker local nas três fases; ver `docs/VALIDACAO-FASE1.md`, `-FASE2.md`, `-FASE3.md`.
 
-Segredos e flags: `DATA_KEYS`, `ACTIVE_DATA_KEY`, `APP_ORIGIN`, `PRIVACY_VERSION`; `AI_ENABLED` para OCR, `GUIDE_AI_ENABLED` para guia, ambos também exigem `ANTHROPIC_API_KEY` e `ANTHROPIC_MODEL`. Manter falsos até configurar contrato, custos, tratamento de dados e testes do provedor. Arquivos `.dev.vars*` são ignorados.
+## Documentos
+
+- `docs/AUDITORIA.md` — auditoria inicial e arquitetura-alvo
+- `docs/AUDITORIA-SEGURANCA.md` — auditoria de segurança e privacidade
+- `docs/VALIDACAO-FASE1.md`, `docs/VALIDACAO-FASE2.md`, `docs/VALIDACAO-FASE3.md` — o que foi testado
+- `docs/PENDENCIAS.md` — pendências e bloqueios
+- `docs/MAINTENANCE.md` — revisão das fontes
 
 Repositório: https://github.com/AmigoLionXP/privefinances

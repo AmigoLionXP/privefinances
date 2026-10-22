@@ -2,6 +2,8 @@ import {household, changeSummary} from './household.mjs';
 import {monthlyBudget, projection, diagnosis, goalCheck, recommendations} from './budget-engine.mjs';
 import {seal, open} from './crypto.mjs';
 import {jsonBody, fail} from './validation.mjs';
+import {track, amountBucket} from './telemetry.mjs';
+import {realizedSavings} from './budget-engine.mjs';
 
 const json = (v, status = 200) => new Response(JSON.stringify(v), {status, headers: {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'}});
 const today = env => (env.TODAY_OVERRIDE && /^\d{4}-\d{2}-\d{2}$/.test(env.TODAY_OVERRIDE) ? env.TODAY_OVERRIDE : new Date().toISOString().slice(0, 10));
@@ -46,6 +48,11 @@ export async function householdRoute(req, env, user) {
     const next = household(await jsonBody(req, 200000));
     const prev = await getHousehold(env, user.id);
     await writeHousehold(env, user.id, next, prev ? 'updated' : 'created', changeSummary(prev, next));
+    const day = today(env).slice(0, 7);
+    if (next.onboarding.completed && !prev?.onboarding?.completed) await track(env, user.id, 'onboarding_completed');
+    if (!prev && next.expenses.length) await track(env, user.id, 'budget_created');
+    const gain = realizedSavings(next, day).monthly - (prev ? realizedSavings(prev, day).monthly : 0);
+    if (gain > 0) await track(env, user.id, 'saving_confirmed', {amountBucket: amountBucket(gain)});
     return json({household: next, overview: overview(next, today(env))});
   }
   if (path === '/api/household/history' && method === 'GET') return json({events: await getHouseholdEvents(env, user.id)});

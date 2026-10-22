@@ -5,6 +5,8 @@ import {findDuplicates, folders, openBills} from '../public/documents.mjs';
 import {household} from './household.mjs';
 import {getHousehold, writeHousehold, overview, today} from './household-routes.mjs';
 import {recommendations, realizedSavings} from './budget-engine.mjs';
+import {currentPlan, track, audit} from './telemetry.mjs';
+import {limit} from '../public/plans.mjs';
 import {seal, open, sha256, b64, unb64, hex} from './crypto.mjs';
 import {jsonBody, fail} from './validation.mjs';
 
@@ -70,6 +72,8 @@ export async function documentsRoute(req, env, user) {
     const input = await jsonBody(req, 7_200_000);
     const count = await env.DB.prepare('SELECT COUNT(*) AS n FROM user_documents WHERE user_id=?').bind(user.id).first();
     if (count.n >= MAX_DOCS) fail('too_many_documents', 409);
+    const plan = (await currentPlan(env, user.id)).plan;
+    if (count.n >= limit(plan, 'documents')) return json({error: 'plan_limit_documents', limit: limit(plan, 'documents'), plan}, 402);
     const id = crypto.randomUUID();
     const doc = {id, status: 'draft', ...documentInput(input.document, {today: day}), budget: {mode: 'none', expenseId: null}, createdAt: new Date().toISOString(), confirmedAt: null, fileHash: null, fileMime: null};
     let fileKey = null;
@@ -94,7 +98,10 @@ export async function documentsRoute(req, env, user) {
     const h = await getHousehold(env, user.id);
     if (!h) return json({recommendations: [], realized: null});
     const docs = await getUserDocuments(env, user.id);
-    return json({recommendations: recommendations(h, day, {documents: docs, max: 8}), realized: realizedSavings(h, day.slice(0, 7)), engine: 'rules_v2_no_llm'});
+    const plan = (await currentPlan(env, user.id)).plan, max = limit(plan, 'recommendations');
+    const all = recommendations(h, day, {documents: docs, max: 8});
+    // O plano gratuito vê as 3 principais; nada crítico fica bloqueado (saldo negativo é sempre a primeira).
+    return json({recommendations: all.slice(0, max), lockedCount: Math.max(0, all.length - max), plan, realized: realizedSavings(h, day.slice(0, 7)), engine: 'rules_v2_no_llm'});
   }
   const m = path.match(/^\/api\/docs\/([a-f0-9-]{36})(\/confirm|\/file|\/paid)?$/);
   if (!m) return null;
@@ -112,6 +119,7 @@ export async function documentsRoute(req, env, user) {
     next.status = 'confirmed'; next.confirmedAt = doc.confirmedAt || new Date().toISOString(); next.budget = link;
     const h = await linkBudget(env, user.id, next, link);
     await store(env, user.id, next);
+    await track(env, user.id, ['qrbill', 'invoice'].includes(next.kind) ? 'bill_registered' : 'document_classified', {kind: next.kind});
     return json({document: next, duplicates, household: h, overview: h ? overview(h, day) : null});
   }
   if (action === '/paid' && method === 'POST') {
@@ -132,6 +140,7 @@ export async function documentsRoute(req, env, user) {
     if (row.file_key) await env.FILES.delete(row.file_key);
     await env.DB.prepare('DELETE FROM user_documents WHERE id=? AND user_id=?').bind(id, user.id).run();
     if (doc.budget?.mode === 'oneoff') await unlinkBudget(env, user.id, id);
+    await audit(env, user.id, 'document_delete', {kind: doc.kind});
     return json({deleted: true});
   }
   if (!action && method === 'GET') return json({document: {...doc, id}});
