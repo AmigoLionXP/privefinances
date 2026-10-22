@@ -63,10 +63,32 @@ async function route(req,env){const url=new URL(req.url),path=url.pathname,metho
  if(path==='/api/debts'&&method==='GET')return json(debtGuide(url.searchParams.get('stage'),url.searchParams.get('lang')));
  if(path==='/api/leads'&&method==='POST'){
  const input=await jsonBody(req);if(input.consent!==true||input.privacyVersion!==env.PRIVACY_VERSION)fail('explicit_current_consent_required');if(!verticals.includes(input.vertical))fail('invalid_vertical');await limit(env,user.id,'leads',10);const id=crypto.randomUUID(),consent=crypto.randomUUID();const payload={name:text(input.name,'name',120),email:user.email,purpose:'contact_requested',privacyVersion:env.PRIVACY_VERSION};
- await env.DB.batch([env.DB.prepare('INSERT INTO consents(id,user_id,purpose,vertical,version) VALUES(?,?,?,?,?)').bind(consent,user.id,'marketplace_contact',input.vertical,env.PRIVACY_VERSION),env.DB.prepare('INSERT INTO leads(id,user_id,consent_id,vertical,payload) VALUES(?,?,?,?,?)').bind(id,user.id,consent,input.vertical,await seal(env,payload,`leads:${user.id}:${id}`))]);return json({trackingId:id,consentId:consent,status:'pending'},201);
+ await env.DB.batch([env.DB.prepare('INSERT INTO consents(id,user_id,purpose,vertical,version) VALUES(?,?,?,?,?)').bind(consent,user.id,'marketplace_contact',input.vertical,env.PRIVACY_VERSION),env.DB.prepare('INSERT INTO leads(id,user_id,consent_id,vertical,payload) VALUES(?,?,?,?,?)').bind(id,user.id,consent,input.vertical,await seal(env,payload,`leads:${user.id}:${id}`))]);await env.DB.prepare("UPDATE leads SET status='review_pending' WHERE id=? AND user_id=?").bind(id,user.id).run();return json({trackingId:id,consentId:consent,status:'review_pending',requiresAdministrativeApproval:true},201);
+ }
+
+ // Administrative approval is deliberately server-side: no client-supplied role or owner identifier.
+ if(path==='/api/admin/leads' || /^\/api\/admin\/leads\/[a-f0-9-]{36}\/decision$/.test(path)){
+  if(!env.ADMIN_REVIEWER_USER_ID || user.id!==env.ADMIN_REVIEWER_USER_ID)fail('forbidden',403);
+  if(path==='/api/admin/leads'&&method==='GET'){
+   const rows=await env.DB.prepare("SELECT l.id,l.user_id,l.vertical,l.status,l.created_at,l.payload,c.revoked_at FROM leads l JOIN consents c ON c.id=l.consent_id ORDER BY l.created_at DESC LIMIT 100").all();
+   return json({leads:await Promise.all((rows.results||[]).map(async r=>({id:r.id,vertical:r.vertical,status:r.status,createdAt:r.created_at,consentValid:!r.revoked_at,contact:await open(env,r.payload,`leads:${r.user_id}:${r.id}`)})))});
+  }
+  if(method==='POST'){
+   const leadId=path.split('/')[4],input=await jsonBody(req);
+   if(!['approve','reject','request_documents'].includes(input.decision))fail('invalid_decision',400);
+   const row=await env.DB.prepare("SELECT l.*,c.revoked_at,u.deleting FROM leads l JOIN consents c ON c.id=l.consent_id JOIN users u ON u.id=l.user_id WHERE l.id=?").bind(leadId).first();
+   if(!row)fail('not_found',404);
+   if(row.status!=='review_pending')fail('lead_not_pending_review',409);
+   if(row.revoked_at||row.deleting)fail('consent_revoked',409);
+   const next={approve:'approved',reject:'rejected',request_documents:'needs_documents'}[input.decision];
+   const result=await env.DB.prepare("UPDATE leads SET status=? WHERE id=? AND status='review_pending' AND EXISTS (SELECT 1 FROM consents WHERE id=leads.consent_id AND revoked_at IS NULL)").bind(next,leadId).run();
+   if(!result.meta?.changes)fail('lead_state_changed',409);
+   return json({trackingId:leadId,status:next,approvedBy:user.id});
+  }
+  fail('not_found',404);
  }
  if(path==='/api/consents'&&method==='GET'){const c=await env.DB.prepare('SELECT id,purpose,vertical,version,granted_at,revoked_at FROM consents WHERE user_id=?').bind(user.id).all();const l=await env.DB.prepare('SELECT id,vertical,status,consent_id FROM leads WHERE user_id=?').bind(user.id).all();return json({consents:c.results,leads:l.results});}
- if(/^\/api\/consents\/[a-f0-9-]{36}$/.test(path)&&method==='DELETE'){const id=path.split('/').pop();const own=await env.DB.prepare('SELECT id FROM consents WHERE id=? AND user_id=?').bind(id,user.id).first();if(!own)fail('not_found',404);await env.DB.batch([env.DB.prepare('UPDATE consents SET revoked_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?').bind(id,user.id),env.DB.prepare("UPDATE leads SET status='cancelled' WHERE consent_id=? AND user_id=? AND status IN ('pending','sending')").bind(id,user.id)]);return json({revoked:true,previousDeliveryCannotBeRecalled:true});}
+ if(/^\/api\/consents\/[a-f0-9-]{36}$/.test(path)&&method==='DELETE'){const id=path.split('/').pop();const own=await env.DB.prepare('SELECT id FROM consents WHERE id=? AND user_id=?').bind(id,user.id).first();if(!own)fail('not_found',404);await env.DB.batch([env.DB.prepare('UPDATE consents SET revoked_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=?').bind(id,user.id),env.DB.prepare("UPDATE leads SET status='cancelled' WHERE consent_id=? AND user_id=? AND status IN ('review_pending','approved','pending','sending','needs_documents')").bind(id,user.id)]);return json({revoked:true,previousDeliveryCannotBeRecalled:true});}
  if(path==='/api/reminders'&&method==='GET'){const rows=await env.DB.prepare("SELECT id,due_at,channel,status,payload FROM reminders WHERE user_id=? AND status!='cancelled' ORDER BY due_at").bind(user.id).all();return json({reminders:await Promise.all(rows.results.map(async r=>{const payload=await open(env,r.payload,`reminders:${user.id}:${r.id}`);return {id:r.id,due_at:r.due_at,channel:r.channel,status:r.status,label:payload.label};}))});}
  if(path==='/api/reminders'&&method==='POST'){const input=await jsonBody(req);if(input.consent!==true||input.privacyVersion!==env.PRIVACY_VERSION)fail('explicit_current_consent_required');if(!['email','push','whatsapp'].includes(input.channel))fail('invalid_channel');const day=date(input.date);if(day<new Date().toISOString().slice(0,10))fail('past_reminder');const id=crypto.randomUUID(),payload={label:text(input.label,'label'),email:user.email,locale:input.locale==='fr'?'fr':'pt'};
  // Push subscriptions / phone must be verified by a gateway before enabling these channels.
