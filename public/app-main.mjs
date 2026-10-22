@@ -1,5 +1,9 @@
 
-import {monthlyBudget,projection,diagnosis,goalCheck,recommendations,EXPENSE_CATEGORIES} from './budget-engine.mjs';
+import {monthlyBudget,projection,diagnosis,goalCheck,recommendations,realizedSavings,EXPENSE_CATEGORIES} from './budget-engine.mjs';
+import {parseQrBill,validIban,formatIban,formatQrr} from './qrbill.mjs';
+import {findDuplicates,folders,recognizeTerms,normalizeName,DOC_KINDS} from './documents.mjs';
+import {KB,searchKb,KB_VERSION,KB_UPDATED} from './canton-vd.mjs';
+import EN from './i18n-en.mjs';
 /* ---------- Dados e armazenamento (modo de teste: tudo fica neste aparelho) ---------- */
 const KEY='privefinances-test-v1';
 const blank=()=>({profile:null,lang:null,budget:{income:[],expenses:[]},receipts:[],reminders:[],checklist:{},leads:[],pillar:{hasLpp:'yes',paid:0,income:0},example:false,guides:{},payslips:[],payslipDraft:null,remit:null,biz:null,lamalCalc:null,rates:null});
@@ -7,7 +11,7 @@ let S=blank();
 function load(){try{const raw=localStorage.getItem(KEY);if(raw)S=Object.assign(blank(),JSON.parse(raw));}catch(e){}}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));return true;}catch(e){toast(t('storageFail'));return false;}}
 load();
-let lang=S.lang||((navigator.language||'').startsWith('fr')?'fr':'pt');
+let lang=S.lang||((navigator.language||'').startsWith('fr')?'fr':(navigator.language||'').startsWith('en')?'en':'pt');
 const uid=()=>Math.random().toString(36).slice(2,10);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const chf=v=>new Intl.NumberFormat(lang==='fr'?'fr-CH':'de-CH',{style:'currency',currency:'CHF',maximumFractionDigits:2}).format(Number(v)||0);
@@ -193,7 +197,7 @@ const NAVOF={deadlines:'money',help:'life'};
 let route={tab:'home',sub:null},docFilter='all',debtStage='reminder',pendingDelete=null,product='credit';
 function svg(n){return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;}
 function renderNav(){const html=TABS.map(([id,k])=>`<button class="navbtn" data-tab="${id}" ${(NAVOF[route.tab]||route.tab)===id?'aria-current="page"':''}>${svg(id)}<span>${t(k)}</span></button>`).join('');document.getElementById('sidenav').innerHTML=html;document.getElementById('tabbar').innerHTML=html;}
-function go(target){const [tab,sub]=String(target).split(':');route={tab,sub:sub||null};try{history.replaceState(null,'','#'+tab);}catch(e){}render();window.scrollTo({top:0});}
+function go(target){const [tab,sub]=String(target).split(':');route={tab,sub:sub||null};try{history.replaceState(null,'','#'+tab+(sub?':'+sub:''));}catch(e){}render();window.scrollTo({top:0});}
 function seg(items,current,attr){return `<div class="seg" role="group">${items.map(([id,k])=>`<button type="button" data-${attr}="${id}" aria-pressed="${current===id}">${t(k)}</button>`).join('')}</div>`;}
 let toastTimer;function toast(msg){const n=document.getElementById('notice');n.textContent=msg;n.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>n.hidden=true,3200);}
 
@@ -239,8 +243,8 @@ function viewMoney(){
     ${hhTotals()}<section class="panel">${sparkline(ep)}</section>
     <div class="btns"><button class="btn ghost small" data-act="csvBudget">${t('exportCsv')}</button><button class="btn ghost small" data-act="copyBudget">${t('copyCsv')}</button></div>`;}
   if(sub==='savings'){const bb=engine().b;const TIP={housing:'tipHousing',lamal:'tipHealth',transport:'tipTransport',food:'tipFood',childcare:'tipKids',tax:'tipTax',insurance:'tipInsurance',credit:'tipCredit',leasing:'tipCredit',leisure:'tipLeisure',telecom:'tipLeisure',remittance:'tipSend'};const top=Object.entries(bb.byCategory).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    body=`<p class="muted">${t('savingsIntro')}</p>`+(top.length?`<section class="panel">${top.map(([c,v])=>{const pc=bb.expenses?Math.round(v/bb.expenses*100):0;return `<div style="display:grid;gap:6px"><div class="btns" style="justify-content:space-between"><strong>${esc(tt('cat',c))}</strong><span class="num">${chfc(v)} · ${pc}% ${t('ofTotal')}</span></div><div class="bar"><i style="width:${pc}%"></i></div><p class="muted small">${t(TIP[c]||'tipOther')}</p></div>`;}).join('')}</section>`:`<div class="empty">${t('noBudget')}</div>`)+recsHtml(engine().r)+
-    savingsExtras()+`<section class="panel"><p class="small"><a href="${SRC.priminfo}" target="_blank" rel="noopener noreferrer">Priminfo ↗</a> · <a href="${SRC.subsidy}" target="_blank" rel="noopener noreferrer">${lang==='fr'?'Subside LAMal, Vaud ↗':'Subsídio LAMal, Vaud ↗'}</a></p></section>`;}
+    body=`<p class="muted">${t('savingsIntro')}</p>`+(top.length?`<section class="panel">${top.map(([c,v])=>{const pc=bb.expenses?Math.round(v/bb.expenses*100):0;return `<div style="display:grid;gap:6px"><div class="btns" style="justify-content:space-between"><strong>${esc(tt('cat',c))}</strong><span class="num">${chfc(v)} · ${pc}% ${t('ofTotal')}</span></div><div class="bar"><i style="width:${pc}%"></i></div><p class="muted small">${t(TIP[c]||'tipOther')}</p></div>`;}).join('')}</section>`:`<div class="empty">${t('noBudget')}</div>`)+adviceHtml()+
+    savingsExtras()+`<section class="panel"><p class="small"><a href="${SRC.priminfo}" target="_blank" rel="noopener noreferrer">Priminfo ↗</a> · <a href="${SRC.subsidy}" target="_blank" rel="noopener noreferrer">${lang==='fr'?'Subside LAMal, Vaud ↗':lang==='en'?'LAMal subsidy, Vaud ↗':'Subsídio LAMal, Vaud ↗'}</a></p></section>`;}
   if(sub==='deadlines')return viewDeadlines();
   if(sub==='send')body=viewSend();
   if(sub==='biz')body=viewBiz();
@@ -267,29 +271,6 @@ function viewMoney(){
     <p class="muted small">${t('p3Note')} <a href="${SRC.pillar3a}" target="_blank" rel="noopener noreferrer">${t('officialSource')}</a></p>`;}
   const mk={budget:'budget',savings:'lamal',install:'conquest',p3:'p3a',send:'debts',biz:'budget'}[sub];
   return `${pagehead(mk,t('moneyTitle'))}${seg([['budget','segBudget'],['deadlines','deadlinesSub'],['savings','segSavings'],['send','segSend'],['install','segInstall'],['p3','seg3a'],['biz','segBiz']],sub,'sub')}${body}`;
-}
-
-function viewDocs(){
-  const list=S.receipts.filter(r=>docFilter==='all'||(docFilter==='unpaid'&&r.status==='unpaid')||(docFilter==='tax'&&r.tax)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-  const items=list.map(r=>`<div class="item">${r.photo?`<img class="thumb" src="${r.photo}" alt="">`:`<div class="thumb">${t(r.kind)}</div>`}
-    <div style="min-width:0"><strong>${esc(r.supplier)}</strong><div class="muted small num">${chf(r.amount)} · ${fmtDate(r.date)}</div><div>${`<span class="tag">${t(r.kind)}</span>`}${r.status==='unpaid'?`<span class="tag warn">${t('unpaid')}${r.due?' · '+fmtDate(r.due):''}</span>`:`<span class="tag">${t('paid')}</span>`}${r.tax?`<span class="tag">${t('filterTax')}</span>`:''}</div></div>
-    <div class="btns">${pendingDelete===r.id?`<button class="btn danger small" data-act="delDoc" data-id="${r.id}">${t('confirmDelete')}</button>`:`<button class="iconbtn" aria-label="${t('remove')}" data-act="askDel" data-id="${r.id}">×</button>`}</div></div>`).join('');
-  const dsub=route.sub||'receipts';if(dsub==='payslip')return `${pagehead('budget',t('docsTitle'),t('psTitle'))}${seg([['receipts','segComprov'],['payslip','segPayslip']],dsub,'sub')}${viewPayslip()}`;
-  return `${pagehead('receipts',t('docsTitle'),t('docsIntro'))}${seg([['receipts','segComprov'],['payslip','segPayslip']],dsub,'sub')}
-  <details class="panel" ${S.receipts.length?'':'open'}><summary style="cursor:pointer"><h2 style="display:inline">${t('newDoc')}</h2></summary><form id="docForm" style="margin-top:14px"><div class="fields">
-    <label class="field wide"><span>${t('photo')}</span><input id="d-photo" name="photo" type="file" accept="image/jpeg,image/png"><small>${t('photoHelp')}</small></label>
-    <label class="field"><span>${t('kind')}</span><select id="d-kind" name="kind">${['invoice','receipt','payslip'].map(k=>`<option value="${k}">${t(k)}</option>`).join('')}</select></label>
-    <label class="field"><span>${t('supplier')} *</span><input id="d-supplier" name="supplier" required maxlength="80"></label>
-    <label class="field"><span>${t('amount')} *</span><input id="d-amount" name="amount" required inputmode="decimal" class="num"></label>
-    <label class="field"><span>${t('date')} *</span><input id="d-date" name="date" type="date" required value="${iso(today().getFullYear(),today().getMonth()+1,today().getDate())}"></label>
-    <label class="field"><span>${t('category')}</span><select id="d-category" name="category">${CATS.map(c=>`<option value="${c}">${t(c)}</option>`).join('')}</select></label>
-    <label class="field"><span>${t('status')}</span><select id="d-status" name="status"><option value="paid">${t('paid')}</option><option value="unpaid">${t('unpaid')}</option></select></label>
-    <label class="field"><span>${t('dueDate')}</span><input id="d-due" name="due" type="date"></label>
-    <label class="check wide"><input id="d-tax" name="tax" type="checkbox"><span>${t('taxFolder')}<br><small class="muted">${t('taxFolderHelp')}</small></span></label>
-  </div><div class="btns"><button class="btn" type="submit">${t('saveDoc')}</button></div></form></details>
-  ${seg([['all','filterAll'],['unpaid','filterUnpaid'],['tax','filterTax']],docFilter,'filter')}
-  <div class="list">${items||`<div class="empty withimg">${photo('empty')}<p>${t('noDocs')}</p></div>`}</div>
-  ${S.receipts.length?`<div class="btns"><button class="btn ghost small" data-act="csvDocs">${t('exportCsv')}</button><button class="btn ghost small" data-act="copyDocs">${t('copyCsv')}</button></div>`:''}`;
 }
 
 function viewDeadlines(){
@@ -393,9 +374,10 @@ function payslipCheck(p){const g=num(p.gross),avsExp=Math.round(g*0.053*100)/100
 function franchiseCost(prem,fr,costs){const pay=Math.min(costs,fr),rest=Math.max(0,costs-fr);return prem*12+pay+Math.min(rest*0.1,700);}
 function inp(id,lab,val,extra=''){return `<label class="field"><span>${t(lab)}</span><input id="${id}" data-v="${id}" inputmode="decimal" class="num" value="${esc(val??'')}" ${extra}></label>`;}
 
-const LIFESEG=[['arrive','segArrive'],['letters','segLetters'],['retire','segRetire'],['leave','segLeave'],['glossary','segGlossary'],['debts','segDebts'],['decl','segDecl'],['experts','segExperts']];
+const LIFESEG=[['guide','segGuide'],['arrive','segArrive'],['letters','segLetters'],['retire','segRetire'],['leave','segLeave'],['glossary','segGlossary'],['debts','segDebts'],['decl','segDecl'],['experts','segExperts']];
 function viewLife(){
-  const sub=route.sub||'arrive';let body='';
+  const sub=route.sub||'guide';let body='';
+  if(sub==='guide')body=guideHtml();
   if(['arrive','retire','leave'].includes(sub)){const g=GUIDES[sub][lang],st=S.guides[sub]||{};const n=g.filter((_,i)=>st[i]).length;
     body=`<section class="panel"><div class="btns" style="justify-content:space-between"><strong>${n}/${g.length} ${t('done')}</strong></div><div class="bar"><i style="width:${Math.round(n/g.length*100)}%"></i></div>
     ${g.map(([a,b,src],i)=>`<label class="check" style="align-items:flex-start"><input type="checkbox" id="g-${sub}-${i}" data-guide="${sub}" data-i="${i}" ${st[i]?'checked':''}><span><strong>${esc(a)}</strong><br><span class="muted small">${esc(b)}</span>${src?` <a class="small" href="${src}" target="_blank" rel="noopener noreferrer">${t('officialSource')}</a>`:''}</span></label>`).join('')}
@@ -407,7 +389,7 @@ function viewLife(){
       ${letterResult?`<div style="display:grid;gap:8px">${letterResult.type?`<p><strong>${t('pasteFound')}:</strong> ${esc(L[letterResult.type][0])}</p>`:`<p class="muted">${t('pasteNone')}</p>`}<p><strong>${t('datesFound')}:</strong></p>${letterResult.dates.length?letterResult.dates.map(d=>`<div class="btns"><span class="num">${fmtDate(d)}</span><button class="btn ghost small" data-act="remindLetter" data-date="${d}">${t('remindThis')}</button></div>`).join(''):`<p class="muted small">${t('noDates')}</p>`}</div>`:''}
       <p class="muted small">${t('lettersWarn')}</p></section>`;}
   if(['glossary','debts','decl','experts'].includes(sub)){route.tab='help';return viewHelp();}
-  const hk={arrive:'profile',letters:'tou',retire:'p3a',leave:'conquest'}[sub];
+  const hk={guide:'experts',arrive:'profile',letters:'tou',retire:'p3a',leave:'conquest'}[sub];
   return `${pagehead(hk,t('solutionsTitle'),t('solutionsSub'))}${seg(LIFESEG,sub,'sub')}${body}`;
 }
 
@@ -428,7 +410,7 @@ function viewSend(){if(!rates&&ratesState==='idle'){rates=S.rates||null;loadRate
   const bestI=offers.filter(x=>x.rec).sort((a,b)=>b.rec-a.rec)[0]?.i;
   const fmt=(v,c)=>new Intl.NumberFormat(lang==='fr'?'fr-CH':'pt-BR',{style:'currency',currency:c,maximumFractionDigits:2}).format(v);
   return `<p class="muted">${t('sendIntro')}</p>
-  <section class="panel"><h2>${t('ratesTitle')}</h2>${rates&&rates.r?`<div class="grid3">${CUR.map(([c,l])=>`<div class="stat"><span class="muted small">${l}</span><strong style="font-size:1.1rem">1 CHF = ${rates.r[c]?.toLocaleString(lang==='fr'?'fr-CH':'pt-BR',{maximumFractionDigits:c==='AOA'||c==='CVE'||c==='MZN'?1:4})} ${c}</strong></div>`).join('')}</div><p class="muted small">${ratesState==='fail'?t('ratesCached')+' · ':''}${t('ratesSource')} ${esc(rates.date||'')} · <a href="${SRC2.rates}" target="_blank" rel="noopener noreferrer">Rates by ExchangeRate-API</a></p>`:`<p class="muted">${ratesState==='fail'?t('ratesFail'):t('ratesLoading')}</p>`}</section>
+  <section class="panel"><h2>${t('ratesTitle')}</h2>${rates&&rates.r?`<div class="grid3">${CUR.map(([c,l])=>`<div class="stat"><span class="muted small">${l}</span><strong style="font-size:1.1rem">1 CHF = ${rates.r[c]?.toLocaleString(lang==='fr'?'fr-CH':lang==='en'?'en-CH':'pt-BR',{maximumFractionDigits:c==='AOA'||c==='CVE'||c==='MZN'?1:4})} ${c}</strong></div>`).join('')}</div><p class="muted small">${ratesState==='fail'?t('ratesCached')+' · ':''}${t('ratesSource')} ${esc(rates.date||'')} · <a href="${SRC2.rates}" target="_blank" rel="noopener noreferrer">Rates by ExchangeRate-API</a></p>`:`<p class="muted">${ratesState==='fail'?t('ratesFail'):t('ratesLoading')}</p>`}</section>
   <section class="panel"><div class="fields">${inp('rm-amount','amountChf',s.amount)}<label class="field"><span>${t('country')}</span><select id="rm-cur" data-v="rm-cur">${CUR.map(([c,l])=>`<option value="${c}" ${s.cur===c?'selected':''}>${l}</option>`).join('')}</select></label></div>
   ${offers.map(({i,o,rec,cost})=>`<div class="panel" style="padding:14px;gap:10px;${i===bestI?'border-color:var(--accent)':''}"><strong>${t('offer')} ${i+1}${i===bestI?` · <span class="tag">${t('best')}</span>`:''}</strong><div class="fields"><label class="field"><span>${t('provider')}</span><input id="rm-name-${i}" data-off="${i}" data-k="name" value="${esc(o.name)}" maxlength="40"></label>${inp('rm-fee-'+i,'feeChf',o.fee,`data-off="${i}" data-k="fee"`).replace(`data-v="rm-fee-${i}" `,'')}${inp('rm-rate-'+i,'rateOffered',o.rate,`data-off="${i}" data-k="rate"`).replace(`data-v="rm-rate-${i}" `,'')}</div>${rec!=null?`<div class="totals"><div class="big" style="border:0;padding:0"><span>${t('received')}</span><span>${fmt(rec,s.cur)}</span></div>${cost!=null?`<div><span>${t('hiddenCost')}</span><span>${chf(cost)}</span></div>`:''}</div>`:''}</div>`).join('')}
   <p class="muted small">${t('partnerSoon')}</p></section>`;}
@@ -526,11 +508,11 @@ const H=()=>S.household;
 let remote=false,syncState='off',saveTimer=null;
 async function api(path,opt={}){const r=await fetch('/api'+path,{credentials:'same-origin',...opt,headers:{'Content-Type':'application/json',...(opt.headers||{})}});const ct=r.headers.get('content-type')||'';if(!ct.includes('json'))throw new Error('no_api');const j=await r.json();if(!r.ok)throw new Error(j.error||'error');return j;}
 const clean=h=>JSON.parse(JSON.stringify({...h,incomes:h.incomes.map(({ex,...r})=>r),expenses:h.expenses.map(({ex,...r})=>r)}));
-async function connect(){try{await api('/me');remote=true;syncState='on';const r=await api('/household');if(r.household){const local=H();S.household={...r.household,incomes:r.household.incomes,expenses:r.household.expenses};if(!r.household.onboarding.completed&&local.onboarding.completed)S.household.onboarding=local.onboarding;}save();render();}catch(e){remote=false;syncState='off';}}
+async function connect(){try{const me=await api('/me');FEATURES=me.features||{};PRIVACY=me.privacyVersion||'';remote=true;syncState='on';const r=await api('/household');if(r.household){const local=H();S.household={...r.household,incomes:r.household.incomes,expenses:r.household.expenses};if(!r.household.onboarding.completed&&local.onboarding.completed)S.household.onboarding=local.onboarding;}save();await loadDocs();render();}catch(e){remote=false;syncState='off';}}
 function saveHH(){H().lang=lang;save();if(!remote)return;clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await api('/household',{method:'PUT',body:JSON.stringify(clean(H()))});syncState='on';}catch(e){syncState='fail';toast(t('syncFail'));}},700);}
 
 /* ----- cálculos com o motor compartilhado ----- */
-function engine(){const h=H(),d=todayISO();return {b:monthlyBudget(h,d.slice(0,7)),p:projection(h,d,30),dg:diagnosis(h,d),g:goalCheck(h,d.slice(0,7)),r:recommendations(h,d)};}
+function engine(){const h=H(),d=todayISO();return {b:monthlyBudget(h,d.slice(0,7)),p:projection(h,d,30),dg:diagnosis(h,d),g:goalCheck(h,d.slice(0,7)),r:recommendations(h,d,{documents:docsList()})};}
 
 /* ----- onboarding em 7 etapas ----- */
 const STEPS=['welcome','profile','income','family','expenses','diagnosis','plan'];
@@ -599,10 +581,10 @@ function diagCards(){const {b,p}=engine();return `<div class="grid3">
   <div class="stat"><span class="muted small">${t('dashAvailable')}</span><strong class="${b.balance<0?'neg':'pos'}">${chfc(b.balance)}</strong><span class="muted small">${t('dashAvailableHelp')}</span></div>
   <div class="stat"><span class="muted small">${t('dashToPay')}</span><strong>${chfc(p.outgoing)}</strong><span class="muted small">${p.nextPayments.length} · ${p.nextPayments[0]?fmtDate(p.nextPayments[0].date):'—'}</span></div>
   <div class="stat"><span class="muted small">${t('dashLowest')}</span><strong class="${p.negative?'neg':''}">${chfc(p.minBalance)}</strong><span class="muted small">${fmtDate(p.minDate)} · ${p.openingConfirmed?t('dashConfirmed'):t('dashEstimated')}</span></div></div>`;}
-function alertsHtml(){const {dg}=engine();return `<section class="panel"><h3>${t('alerts')}</h3>${dg.risks.length?dg.risks.map(r=>`<div class="banner" style="${r.severity==='critical'?'background:var(--bad-bg)':r.severity==='info'?'background:var(--soft)':''}"><span>${r.severity==='critical'?'●':'○'}</span><span>${esc(tt('risk',r.id,{date:fmtDate(r.date),share:r.share}))}</span></div>`).join(''):`<p class="muted">${t('noAlerts')}</p>`}</section>`;}
+function alertsHtml(){const {dg}=engine();const dl=docsList(),late=dl.filter(d=>d.status==='confirmed'&&d.paymentState!=='paid'&&d.dueDate&&d.dueDate<todayISO()&&['qrbill','invoice'].includes(d.kind)).length,crit=dl.filter(d=>(d.terms||[]).some(x=>x.severity==='critical'));const extra=(late?`<div class="banner" style="background:var(--bad-bg)"><span>●</span><span>${t('lateBills',{n:late})}</span></div>`:'')+crit.map(d=>{const x=d.terms.find(y=>y.severity==='critical');return `<div class="banner" style="background:var(--bad-bg)"><span>●</span><span>${esc(t('termAlert',{name:d.creditor,n:x.deadlineDays}))}</span></div>`;}).join('');return `<section class="panel"><h3>${t('alerts')}</h3>${extra}${dg.risks.length||extra?dg.risks.map(r=>`<div class="banner" style="${r.severity==='critical'?'background:var(--bad-bg)':r.severity==='info'?'background:var(--soft)':''}"><span>${r.severity==='critical'?'●':'○'}</span><span>${esc(tt('risk',r.id,{date:fmtDate(r.date),share:r.share}))}</span></div>`).join(''):`<p class="muted">${t('noAlerts')}</p>`}</section>`;}
 function goalHtml(g){if(!g.goal)return `<p class="muted">${t('noGoal')}</p>`;return `<div class="totals"><div><span>${t('goalTitle')}</span><strong>${chfc(g.goal)}</strong></div><div class="small"><span>${g.feasible?t('goalOk'):t('goalGap',{gap:chfc(g.gap),sug:chfc(g.suggested)})}</span></div></div>`;}
 function recsHtml(list){if(!list.length)return '';return `<section class="panel"><h3>${t('recs')}</h3><ol class="actions">${list.map(r=>`<li><strong>${esc(tt('rec',r.problem,{label:r.label||'',date:fmtDate(r.date),cat:tt('cat',r.category||'other')}))}</strong>
-  <div class="meta small"><span>${t('current')}: <b class="num">${chfc(Math.abs(r.current||0))}</b></span><span>${t('potential')}: <b class="num">${r.potentialMonthly!=null?chfc(r.potentialMonthly)+'/'+(lang==='fr'?'mois':'mês'):t('unknownSaving')}</b></span><span class="tag">${esc(tt('recState',r.state))}</span></div>
+  <div class="meta small"><span>${t('current')}: <b class="num">${chfc(Math.abs(r.current||0))}</b></span><span>${t('potential')}: <b class="num">${r.potentialMonthly!=null?chfc(r.potentialMonthly)+'/'+(lang==='fr'?'mois':lang==='en'?'month':'mês'):t('unknownSaving')}</b></span><span class="tag">${esc(tt('recState',r.state))}</span></div>
   <p class="muted small">→ ${esc(tt('next',r.nextAction))}${r.source?` · <a href="${r.source}" target="_blank" rel="noopener noreferrer">${t('source')} ↗</a>`:''}</p>
   <div class="btns"><button class="btn ghost small" data-rec="${r.id}" data-state="in_review">${t('markReview')}</button><button class="btn ghost small" data-rec="${r.id}" data-state="done">${t('markDone')}</button><button class="link" data-rec="${r.id}" data-state="discarded">${t('markDiscard')}</button></div></li>`).join('')}</ol></section>`;}
 function viewDashboard(){const e=engine(),h=H();
@@ -618,10 +600,246 @@ function viewDashboard(){const e=engine(),h=H();
   <section style="display:grid;gap:12px"><p class="label">${t('storiesLabel')}</p><div class="stories">${STORIES[lang].map(([k,a,b,g])=>`<button type="button" class="story" data-go="${g}">${photo(k)}<span class="txt"><strong>${esc(a)}</strong><span>${esc(b)}</span></span></button>`).join('')}</div></section>
   <p class="muted small">${remote?t('syncOn'):t('syncOff')} · ${t('illustrative')}</p>`;}
 function viewProfile(){const h=H();return `${pagehead('profile',t('profileTitle'))}
-  <section class="panel"><div class="fields"><label class="field"><span>${t('langLbl')}</span><select id="pf-lang" data-setlang-select="1"><option value="pt" ${lang==='pt'?'selected':''}>Português</option><option value="fr" ${lang==='fr'?'selected':''}>Français</option></select></label>
+  <section class="panel"><div class="fields"><label class="field"><span>${t('langLbl')}</span><select id="pf-lang" data-setlang-select="1"><option value="pt" ${lang==='pt'?'selected':''}>Português</option><option value="fr" ${lang==='fr'?'selected':''}>Français</option><option value="en" ${lang==='en'?'selected':''}>English</option></select></label>
   <div class="field"><span>${t('commune')}</span><strong>${esc(h.profile.commune||'—')}</strong></div></div><div><button class="btn ghost" data-act="redoOnboard">${t('editOnboard')}</button></div><p class="muted small">${remote?t('syncOn'):t('syncOff')}</p></section>
   <section class="panel"><h3>${t('segPrivacy')}</h3><p class="muted">${remote?'':t('privIntro')}</p><div class="btns"><button class="btn ghost" data-act="json">${t('downloadJson')}</button>${pendingDelete==='ALL'?`<button class="btn danger" data-act="wipe">${t('confirmDeleteAll')}</button>`:`<button class="btn danger" data-act="askWipe">${t('deleteAll')}</button>`}</div></section>
   <section class="panel"><h3>${t('planTitle')}</h3><p><strong>${t('planFree')}</strong></p><p class="muted small">${t('planInfo')}</p></section>`;}
+
+/* ---------- v5: scanner QR/PDF, documentos, pastas, Budget AI e Guia Suisse ---------- */
+T.en=EN.T;GLOSS.en=EN.GLOSS;DEBTS.en=EN.DEBTS;ALT.en=EN.ALT;STORIES.en=EN.STORIES;ACT.en=EN.ACT;for(const k of Object.keys(GUIDES))GUIDES[k].en=EN.GUIDES[k];LETTERS.en=EN.LETTERS;
+Object.assign(T.pt,{
+segScan:'Digitalizar',segInbox:'Meus documentos',segFolders:'Pastas',scanTitle:'Scanner financeiro',scanIntro:'Fotografe ou envie uma QR-fatura, um PDF ou um recibo. O app lê o código QR, confere os dados e só registra depois da sua confirmação. Nenhum pagamento é feito pelo app.',
+scanCamera:'Tirar foto',scanUpload:'Enviar imagem ou PDF',scanPaste:'Colar o texto do QR',scanManual:'Digitar sem foto',scanReading:'Lendo o documento…',scanNoQr:'Não encontramos um código QR. Preencha os dados abaixo ou tente uma foto mais nítida, de perto e com boa luz.',
+scanQrOk:'QR-fatura lida e conferida (norma SIX {v}).',scanQrBad:'O código QR não segue a norma. Confira cada campo antes de confirmar.',scanPdfFail:'Não foi possível abrir este PDF.',scanFileBig:'Arquivo grande demais (máximo 5 MB).',scanFileType:'Use JPG, PNG, WEBP ou PDF.',
+pasteQrLabel:'Texto do código QR (começa com SPC)',readQr:'Ler',reviewTitle:'Confira antes de registrar',docKind:'Tipo de documento',
+k_qrbill:'QR-fatura',k_invoice:'Fatura',k_receipt:'Recibo',k_payslip:'Holerite',k_tax:'Documento fiscal',k_contract:'Contrato',k_letter:'Carta',
+creditor:'Credor / emissor',currency:'Moeda',iban:'IBAN',refType:'Tipo de referência',reference:'Referência',docDate:'Data do documento',suggested:'sugerido pela fatura',invoiceNo:'Nº da fatura',message:'Mensagem',notesLbl:'Observações ou texto da carta',
+taxRelevant:'Guardar na pasta “para análise fiscal”',taxRelevantHelp:'Só organiza. Não confirma nenhuma dedução.',
+budgetLink:'No orçamento',blOneoff:'Adicionar como conta a pagar (entra na projeção)',blExisting:'Já está no meu orçamento como:',blNone:'Só arquivar',
+dupTitle:'Possível documento duplicado',dupAck:'Conferi: não é a mesma fatura, quero registrar mesmo assim',dupReason:{same_payment_reference:'mesma referência de pagamento',same_file:'mesmo arquivo',same_document:'mesmo documento',similar_amount_date:'mesmo credor e valor em datas próximas'},
+confirmDoc:'Confirmar e registrar',cancel:'Cancelar',docSaved:'Documento registrado.',docDraftKept:'Rascunho guardado em Meus documentos.',
+qrErr:{invalid_iban:'IBAN inválido',qr_iban_requires_qrr:'QR-IBAN exige referência QR',qrr_requires_qr_iban:'Referência QR exige QR-IBAN',invalid_qrr_reference:'Referência QR com dígito de controle errado',invalid_scor_reference:'Referência RF com dígito de controle errado',invalid_amount:'Valor fora do formato',invalid_currency:'Moeda não aceita (só CHF ou EUR)',missing_trailer:'Fim de dados (EPD) ausente',unsupported_version:'Versão não suportada',creditor_missing:'Credor ausente',not_swiss_qr_code:'Não é um Swiss QR Code',missing_elements:'Código incompleto',creditor_combined_address_legacy:'Endereço no formato antigo (combinado)',trailing_line_break:'Quebra de linha a mais no final',additional_information_too_long:'Mensagem longa demais'},
+termsTitle:'O que este documento pode significar',termSev:{critical:'Urgente',high:'Importante',medium:'Atenção',info:'Informação'},termDeadline:'Prazo legal: {n} dias a partir do recebimento.',seeGuide:'Ver no Guia Suisse',
+inboxAll:'Todos',inboxOpen:'A pagar',inboxDraft:'Rascunhos',inboxTax:'Fiscal',folderActive:'Pasta: {name}',clearFolder:'Limpar',noDocs2:'Nenhum documento ainda. Comece digitalizando uma fatura.',
+draft:'Rascunho',confirmedS2:'Registrado',markPaid:'Marcar como paga',markUnpaid:'Marcar como não paga',download:'Baixar arquivo',late2:'Atrasada',dueIn:'vence {d}',
+foldersCred:'Por credor',foldersYear:'Por ano fiscal',foldersTax:'Para análise fiscal',docsCount:'{n} documento(s)',openAmount:'em aberto',
+localOnlyFile:'Sem conta conectada, PDFs não são guardados neste aparelho; só os dados.',
+adviceTitle:'Budget AI — recomendações verificáveis',adviceIntro:'Regras transparentes, sem modelo de linguagem: o app só mostra economia quando você informa um valor-alvo ou quando um documento confirmado prova a diferença.',
+fProblem:'Problema',fCurrent:'Valor atual',fAlt:'Alternativa',fPotential:'Economia potencial',fCond:'Condições',fSource:'Fonte',fNext:'Próxima ação',fState:'Estado',priority:'Prioridade {n}',
+doneConfirm:'Já troquei: confirmar novo valor',realizedTitle:'Economia realizada (confirmada por você)',realizedNone:'Ainda nenhuma. Ela aparece quando você confirma um novo valor mais baixo.',blockers:'Gastos que mais pesam',perYear:'por ano',
+guideTitle:'Guia Suisse',guideIntro:'Respostas curtas com fonte oficial, data de conferência e vigência. É informação geral, não aconselhamento individual.',guideAsk:'Sua pergunta',guideBtn:'Perguntar',
+guideEx:'Como peço o subsídio da LAMal em Vaud?|Até quando posso trocar de LAMal?|Recebi um commandement de payer, o que faço?|Qual o prazo da declaração de impostos em Vaud?|O que é descontado no meu holerite?|Quanto posso pôr no 3a em 2026?',
+guideValid:'Vigente desde {from}',guideUntil:' até {to}',guideChecked:'fonte conferida em {d}',guideReview:'fonte em revisão',guidePro:'Para decidir no seu caso, fale com um profissional habilitado ou com a autoridade.',guideNoSrc:'Sem fonte oficial verificada na base',guideKb:'Base {v}, atualizada em {d}',
+guideAI:'Reescrever com IA usando só estas fontes',guideAIConsent:'Concordo em enviar a pergunta (sem meus dados) ao provedor de IA',
+topic:{insurance:'Seguros',tax:'Impostos',salary:'Salário',pension:'Previdência',debts:'Dívidas',housing:'Moradia',bills:'Faturas',budget:'Orçamento'},segGuide:'Guia Suisse',
+generalInfo:'Informação geral, não é aconselhamento individual.',lateBills:'{n} fatura(s) atrasada(s) em Meus documentos.',termAlert:'{name}: prazo legal de {n} dias. Veja o que fazer no Guia Suisse.'
+});
+Object.assign(T.fr,{
+segScan:'Numériser',segInbox:'Mes documents',segFolders:'Dossiers',scanTitle:'Scanner financier',scanIntro:'Photographiez ou envoyez une QR-facture, un PDF ou un reçu. L’app lit le code QR, contrôle les données et n’enregistre qu’après votre confirmation. L’app n’effectue aucun paiement.',
+scanCamera:'Prendre une photo',scanUpload:'Envoyer une image ou un PDF',scanPaste:'Coller le texte du QR',scanManual:'Saisir sans photo',scanReading:'Lecture du document…',scanNoQr:'Aucun code QR trouvé. Remplissez les données ci-dessous ou reprenez une photo plus nette, de près et bien éclairée.',
+scanQrOk:'QR-facture lue et contrôlée (norme SIX {v}).',scanQrBad:'Le code QR ne respecte pas la norme. Vérifiez chaque champ avant de confirmer.',scanPdfFail:'Impossible d’ouvrir ce PDF.',scanFileBig:'Fichier trop volumineux (5 Mo au maximum).',scanFileType:'Utilisez JPG, PNG, WEBP ou PDF.',
+pasteQrLabel:'Texte du code QR (commence par SPC)',readQr:'Lire',reviewTitle:'Vérifiez avant d’enregistrer',docKind:'Type de document',
+k_qrbill:'QR-facture',k_invoice:'Facture',k_receipt:'Reçu',k_payslip:'Fiche de salaire',k_tax:'Document fiscal',k_contract:'Contrat',k_letter:'Lettre',
+creditor:'Créancier / émetteur',currency:'Monnaie',iban:'IBAN',refType:'Type de référence',reference:'Référence',docDate:'Date du document',suggested:'proposé par la facture',invoiceNo:'N° de facture',message:'Message',notesLbl:'Remarques ou texte de la lettre',
+taxRelevant:'Classer dans le dossier « à examiner pour les impôts »',taxRelevantHelp:'Classement seulement. Ne confirme aucune déduction.',
+budgetLink:'Dans le budget',blOneoff:'Ajouter comme facture à payer (entre dans la projection)',blExisting:'Déjà dans mon budget comme :',blNone:'Archiver seulement',
+dupTitle:'Doublon possible',dupAck:'J’ai vérifié : ce n’est pas la même facture, je veux l’enregistrer',dupReason:{same_payment_reference:'même référence de paiement',same_file:'même fichier',same_document:'même document',similar_amount_date:'même créancier et montant à des dates proches'},
+confirmDoc:'Confirmer et enregistrer',cancel:'Annuler',docSaved:'Document enregistré.',docDraftKept:'Brouillon conservé dans Mes documents.',
+qrErr:{invalid_iban:'IBAN invalide',qr_iban_requires_qrr:'Un QR-IBAN exige une référence QR',qrr_requires_qr_iban:'Une référence QR exige un QR-IBAN',invalid_qrr_reference:'Chiffre de contrôle de la référence QR erroné',invalid_scor_reference:'Chiffre de contrôle de la référence RF erroné',invalid_amount:'Montant hors format',invalid_currency:'Monnaie non acceptée (CHF ou EUR)',missing_trailer:'Fin des données (EPD) absente',unsupported_version:'Version non prise en charge',creditor_missing:'Créancier absent',not_swiss_qr_code:'Ce n’est pas un Swiss QR Code',missing_elements:'Code incomplet',creditor_combined_address_legacy:'Adresse à l’ancien format (combinée)',trailing_line_break:'Saut de ligne en trop à la fin',additional_information_too_long:'Message trop long'},
+termsTitle:'Ce que ce document peut signifier',termSev:{critical:'Urgent',high:'Important',medium:'Attention',info:'Information'},termDeadline:'Délai légal : {n} jours dès la réception.',seeGuide:'Voir dans le Guide Suisse',
+inboxAll:'Tous',inboxOpen:'À payer',inboxDraft:'Brouillons',inboxTax:'Impôts',folderActive:'Dossier : {name}',clearFolder:'Effacer',noDocs2:'Aucun document pour l’instant. Commencez par numériser une facture.',
+draft:'Brouillon',confirmedS2:'Enregistré',markPaid:'Marquer comme payée',markUnpaid:'Marquer comme non payée',download:'Télécharger le fichier',late2:'En retard',dueIn:'échéance {d}',
+foldersCred:'Par créancier',foldersYear:'Par année fiscale',foldersTax:'À examiner pour les impôts',docsCount:'{n} document(s)',openAmount:'ouvert',
+localOnlyFile:'Sans compte connecté, les PDF ne sont pas conservés sur cet appareil ; seules les données le sont.',
+adviceTitle:'Budget AI — recommandations vérifiables',adviceIntro:'Des règles transparentes, sans modèle de langage : l’app n’affiche une économie que si vous saisissez un montant cible ou si un document confirmé prouve l’écart.',
+fProblem:'Problème',fCurrent:'Montant actuel',fAlt:'Alternative',fPotential:'Économie potentielle',fCond:'Conditions',fSource:'Source',fNext:'Prochaine action',fState:'État',priority:'Priorité {n}',
+doneConfirm:'C’est fait : confirmer le nouveau montant',realizedTitle:'Économie réalisée (confirmée par vous)',realizedNone:'Aucune pour l’instant. Elle apparaît quand vous confirmez un nouveau montant plus bas.',blockers:'Dépenses qui pèsent le plus',perYear:'par an',
+guideTitle:'Guide Suisse',guideIntro:'Des réponses courtes avec source officielle, date de vérification et validité. Information générale, pas un conseil individuel.',guideAsk:'Votre question',guideBtn:'Demander',
+guideEx:'Comment demander le subside LAMal dans le canton de Vaud ?|Jusqu’à quand puis-je changer de LAMal ?|J’ai reçu un commandement de payer, que faire ?|Quel est le délai de la déclaration d’impôt dans le canton de Vaud ?|Que déduit-on sur ma fiche de salaire ?|Combien puis-je verser au 3a en 2026 ?',
+guideValid:'En vigueur depuis le {from}',guideUntil:' jusqu’au {to}',guideChecked:'source vérifiée le {d}',guideReview:'source en révision',guidePro:'Pour décider dans votre cas, adressez-vous à un professionnel habilité ou à l’autorité.',guideNoSrc:'Pas de source officielle vérifiée dans la base',guideKb:'Base {v}, mise à jour le {d}',
+guideAI:'Reformuler avec l’IA en utilisant seulement ces sources',guideAIConsent:'J’accepte d’envoyer la question (sans mes données) au fournisseur d’IA',
+topic:{insurance:'Assurances',tax:'Impôts',salary:'Salaire',pension:'Prévoyance',debts:'Dettes',housing:'Logement',bills:'Factures',budget:'Budget'},segGuide:'Guide Suisse',
+generalInfo:'Information générale, pas un conseil individuel.',lateBills:'{n} facture(s) en retard dans Mes documents.',termAlert:'{name} : délai légal de {n} jours. Voir que faire dans le Guide Suisse.'
+});
+Object.assign(T.pt.rec,{cost_increased:'A conta de “{label}” subiu.',recurring_not_in_budget:'“{label}” se repete e não está no orçamento.',goal_above_capacity:'A meta passa do que sobra no mês.',insurance_can_be_reviewed:'Seus seguros podem ser revistos.',subscriptions_add_up:'Assinaturas e telefone somam todo mês.'});
+Object.assign(T.fr.rec,{cost_increased:'La facture « {label} » a augmenté.',recurring_not_in_budget:'« {label} » revient et n’est pas dans le budget.',goal_above_capacity:'L’objectif dépasse ce qui reste chaque mois.',insurance_can_be_reviewed:'Vos assurances peuvent être revues.',subscriptions_add_up:'Abonnements et téléphone s’additionnent chaque mois.'});
+Object.assign(T.pt.next,{add_as_recurring_expense:'Adicionar como despesa recorrente',ask_creditor_or_compare:'Perguntar o motivo ao credor ou comparar',adjust_goal_or_reduce_flexible:'Ajustar a meta ou reduzir gastos flexíveis',list_policies_and_notice_dates:'Listar apólices e prazos de rescisão',list_and_cancel_unused_subscriptions:'Listar e cancelar o que não usa'});
+Object.assign(T.fr.next,{add_as_recurring_expense:'Ajouter comme dépense récurrente',ask_creditor_or_compare:'Demander la raison au créancier ou comparer',adjust_goal_or_reduce_flexible:'Ajuster l’objectif ou réduire les dépenses flexibles',list_policies_and_notice_dates:'Lister polices et délais de résiliation',list_and_cancel_unused_subscriptions:'Lister et résilier ce qui ne sert pas'});
+T.pt.cond={compare_coverage_and_deadlines:'Compare a cobertura e os prazos de troca',check_contract_terms:'Veja prazo de aviso e multas do contrato',change_by_30_11_letter_must_arrive:'A carta precisa chegar à seguradora até 30/11',official_income_criteria_no_guarantee:'Critérios oficiais de renda; sem garantia',depends_on_rate_in_lease:'Depende da taxa indicada no contrato',check_notice_period_and_coverage:'Veja prazo de aviso e cobertura',adjust_goal_or_reduce_flexible:'Meta realista conforme o que sobra',compare_bills_check_reason:'Compare as duas faturas e o motivo do aumento'};
+T.fr.cond={compare_coverage_and_deadlines:'Comparez la couverture et les délais de changement',check_contract_terms:'Vérifiez préavis et pénalités du contrat',change_by_30_11_letter_must_arrive:'La lettre doit parvenir à l’assureur au plus tard le 30.11',official_income_criteria_no_guarantee:'Critères officiels de revenu ; sans garantie',depends_on_rate_in_lease:'Dépend du taux indiqué dans le bail',check_notice_period_and_coverage:'Vérifiez préavis et couverture',adjust_goal_or_reduce_flexible:'Objectif réaliste selon ce qui reste',compare_bills_check_reason:'Comparez les deux factures et la raison de la hausse'};
+
+const KB_BY_ID=Object.fromEntries(KB.map(e=>[e.id,e]));
+let FEATURES={guideAI:false},PRIVACY='';
+let DOCS={list:[],loaded:false};
+let SC={step:'pick',busy:false,msg:'',parse:null,file:null,draft:null,dups:[],ack:false,draftId:null,budget:'oneoff',expenseId:''};
+let docFold=null,inboxFilter='all',guideQ='',guideRes=null,guideBusy=false,useAI=false,aiConsent=false,pendingDocDel=null;
+
+/* documentos: na conta (cifrados no servidor) ou neste aparelho */
+function migrateReceipts(){if(S.docs)return;const map={catHousing:'housing',catHealth:'lamal',catTransport:'transport',catFood:'food',catKids:'childcare',catTax:'tax',catInsurance:'insurance',catCredit:'credit',catLeisure:'leisure',catSend:'remittance',catOther:'other'};
+  S.docs=(S.receipts||[]).map(r=>({id:r.id,kind:['invoice','receipt','payslip'].includes(r.kind)?r.kind:'invoice',source:'manual',status:'confirmed',creditor:r.supplier||'—',amount:cents(r.amount),currency:'CHF',iban:'',referenceType:null,reference:'',documentDate:r.date||null,dueDate:r.due||null,category:map[r.category]||'other',taxRelevant:!!r.tax,taxYear:Number((r.date||todayISO()).slice(0,4)),paymentState:r.status==='unpaid'?'unpaid':'paid',preview:r.photo||null,terms:[],budget:{mode:'none'},ex:r.ex}));}
+migrateReceipts();
+function docsList(){return remote?DOCS.list:S.docs;}
+async function loadDocs(){if(!remote)return;try{const r=await api('/docs');DOCS={list:r.documents,loaded:true};}catch(e){}}
+
+/* leitura do QR: BarcodeDetector quando existe, senão jsQR (local, sem envio) */
+let jsqrReady=null;
+function loadJsQR(){if(window.jsQR)return Promise.resolve();if(!jsqrReady)jsqrReady=new Promise((res,rej)=>{const s=document.createElement('script');s.src='vendor/jsqr.min.js';s.onload=()=>res();s.onerror=()=>rej(new Error('jsqr'));document.head.appendChild(s);});return jsqrReady;}
+async function decodeCanvas(c){
+  if('BarcodeDetector' in window){try{const fmts=await BarcodeDetector.getSupportedFormats();if(fmts.includes('qr_code')){const r=await new BarcodeDetector({formats:['qr_code']}).detect(c);const hit=r.find(x=>String(x.rawValue).startsWith('SPC'))||r[0];if(hit)return hit.rawValue;}}catch(e){}}
+  await loadJsQR();const ctx=c.getContext('2d',{willReadFrequently:true});const d=ctx.getImageData(0,0,c.width,c.height);const r=window.jsQR(d.data,c.width,c.height,{inversionAttempts:'attemptBoth'});return r?r.data:null;}
+function canvasFrom(src,w,h,max){const k=Math.min(1,max/Math.max(w,h));const c=document.createElement('canvas');c.width=Math.round(w*k);c.height=Math.round(h*k);c.getContext('2d').drawImage(src,0,0,c.width,c.height);return c;}
+async function decodeImage(file){const bmp=await createImageBitmap(file);for(const max of [1800,1100,2600]){const txt=await decodeCanvas(canvasFrom(bmp,bmp.width,bmp.height,max));if(txt)return txt;}return null;}
+async function decodePdf(buf){const pdfjs=await import('./vendor/pdf.min.mjs');pdfjs.GlobalWorkerOptions.workerSrc='vendor/pdf.worker.min.mjs';const doc=await pdfjs.getDocument({data:buf,isEvalSupported:false}).promise;
+  for(let p=1;p<=Math.min(3,doc.numPages);p++){const page=await doc.getPage(p);for(const scale of [2,3]){const vp=page.getViewport({scale});const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;const txt=await decodeCanvas(c);if(txt)return txt;}}return null;}
+function toB64(buf){const b=new Uint8Array(buf);let s='';for(let i=0;i<b.length;i+=8192)s+=String.fromCharCode(...b.subarray(i,i+8192));return btoa(s);}
+async function compressImage(file){const bmp=await createImageBitmap(file);const c=canvasFrom(bmp,bmp.width,bmp.height,1600);const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',0.82));return {buf:await blob.arrayBuffer(),mime:'image/jpeg',preview:c.toDataURL('image/jpeg',0.5)};}
+
+function draftFromQr(p){const d=p.data;return {kind:'qrbill',source:'qr',creditor:d.creditor?.name||'',amount:d.amount,currency:d.currency||'CHF',iban:d.iban||'',referenceType:d.referenceType,reference:d.reference||'',message:d.message||'',invoiceNumber:d.billing?.invoiceNumber||'',documentDate:d.billing?.documentDate||null,dueDate:d.billing?.dueDate||null,dueSuggested:!!d.billing?.dueDate,category:'other',taxRelevant:false,notes:'',qrWarnings:[...p.warnings]};}
+const blankDraft=(kind='invoice')=>({kind,source:'manual',creditor:'',amount:null,currency:'CHF',iban:'',referenceType:null,reference:'',message:'',invoiceNumber:'',documentDate:todayISO(),dueDate:null,category:'other',taxRelevant:false,notes:'',qrWarnings:[]});
+function startReview(draft,parse=null){SC={...SC,step:'review',busy:false,parse,draft,dups:[],ack:false,draftId:null,budget:['qrbill','invoice'].includes(draft.kind)&&draft.currency==='CHF'?'oneoff':'none',expenseId:''};SC.dups=findDuplicates({...draft,id:'new',fileHash:null},docsList().filter(x=>x.status==='confirmed'));render();window.scrollTo({top:0});}
+async function handleFile(file){if(!file)return;if(file.size>5_000_000){toast(t('scanFileBig'));return;}const isPdf=file.type==='application/pdf'||/\.pdf$/i.test(file.name);if(!isPdf&&!/^image\//.test(file.type)){toast(t('scanFileType'));return;}
+  SC={...SC,busy:true,msg:t('scanReading')};render();let txt=null,stored=null;
+  try{if(isPdf){const buf=await file.arrayBuffer();stored={buf,mime:'application/pdf',preview:null};try{txt=await decodePdf(buf.slice(0));}catch(e){toast(t('scanPdfFail'));}}
+    else{txt=await decodeImage(file);stored=await compressImage(file);}}catch(e){}
+  SC.file=stored?{b64:toB64(stored.buf),mime:stored.mime,preview:stored.preview,name:file.name}:null;
+  if(txt&&txt.startsWith('SPC')){const p=parseQrBill(txt);startReview(draftFromQr(p),p);}else{SC.msg=t('scanNoQr');startReview(blankDraft('invoice'));SC.msg=t('scanNoQr');render();}}
+
+/* telas do scanner */
+function qrStatus(){const p=SC.parse;if(!p)return SC.msg?`<div class="banner"><span>○</span><span>${esc(SC.msg)}</span></div>`:'';const errs=p.errors.map(e=>tt('qrErr',e)).join(' · '),warns=p.warnings.map(e=>tt('qrErr',e)).join(' · ');
+  return p.ok?`<div class="banner" style="background:var(--soft)"><span>✓</span><span>${t('scanQrOk',{v:esc(p.data.spec)})}${warns?`<br><small class="muted">${esc(warns)}</small>`:''}</span></div>`:`<div class="banner" style="background:var(--bad-bg)"><span>!</span><span>${t('scanQrBad')}<br><small>${esc(errs)}</small></span></div>`;}
+function termsHtml(terms){if(!terms.length)return '';return `<section class="panel"><h3>${t('termsTitle')}</h3>${terms.map(x=>{const e=KB_BY_ID[x.kbId];return `<div class="banner" style="${x.severity==='critical'?'background:var(--bad-bg)':x.severity==='info'?'background:var(--soft)':''}"><span>${x.severity==='critical'?'●':'○'}</span><span><strong>${esc(tt('termSev',x.severity))}</strong>${x.deadlineDays?' · '+t('termDeadline',{n:x.deadlineDays}):''}<br>${e?esc(e[lang]||e.pt):''} <button type="button" class="link" data-sc="askGuide" data-q="${esc(x.kbId)}">${t('seeGuide')}</button></span></div>`;}).join('')}</section>`;}
+function dupHtml(){if(!SC.dups.length)return '';return `<section class="panel" style="border-color:var(--warn)"><h3>${t('dupTitle')}</h3><ul style="margin:0;padding-left:20px">${SC.dups.map(d=>`<li>${esc(d.creditor)} · <span class="num">${d.amount!=null?chfc(d.amount):'—'}</span>${d.dueDate?' · '+fmtDate(d.dueDate):''} — ${esc(tt('dupReason',d.reason))}</li>`).join('')}</ul>
+  <label class="check"><input type="checkbox" id="sc-ack" data-scf="ack" ${SC.ack?'checked':''}><span>${t('dupAck')}</span></label></section>`;}
+function reviewHtml(){const d=SC.draft,bill=['qrbill','invoice'].includes(d.kind),letter=['letter','contract','tax'].includes(d.kind),terms=recognizeTerms([d.creditor,d.message,d.notes].join(' '));
+  const f=(k,lab,val,attrs='')=>`<label class="field"><span>${lab}</span><input id="sc-${k}" data-scf="${k}" value="${esc(val??'')}" ${attrs}></label>`;
+  const exp=H().expenses.filter(e=>!String(e.id).startsWith('doc_'));
+  return `<section class="panel"><h2>${t('reviewTitle')}</h2>${qrStatus()}${SC.file?.preview?`<img src="${SC.file.preview}" alt="" style="max-height:180px;border-radius:10px;justify-self:start">`:''}
+  <div class="fields"><label class="field"><span>${t('docKind')}</span><select id="sc-kind" data-scf="kind">${DOC_KINDS.map(k=>`<option value="${k}" ${d.kind===k?'selected':''}>${t('k_'+k)}</option>`).join('')}</select></label>
+  ${f('creditor',t('creditor')+(bill||d.kind==='receipt'?' *':''),d.creditor,'maxlength="120"')}
+  ${letter?'':f('amount',t('amount'),d.amount!=null?fromC(d.amount).toFixed(2):'','inputmode="decimal" class="num"')}
+  ${letter?'':`<label class="field"><span>${t('currency')}</span><select id="sc-currency" data-scf="currency">${['CHF','EUR'].map(c=>`<option ${d.currency===c?'selected':''}>${c}</option>`).join('')}</select></label>`}
+  ${bill?f('dueDate',t('dueDate')+(d.dueSuggested?` <span class="tag">${t('suggested')}</span>`:''),d.dueDate,'type="date"'):''}
+  ${f('documentDate',t('docDate'),d.documentDate,'type="date"')}
+  ${bill?f('iban',t('iban'),d.iban?formatIban(d.iban):'','maxlength="42" autocomplete="off"'):''}
+  ${bill?`<label class="field"><span>${t('refType')}</span><select id="sc-referenceType" data-scf="referenceType"><option value="">—</option>${['QRR','SCOR','NON'].map(x=>`<option ${d.referenceType===x?'selected':''}>${x}</option>`).join('')}</select></label>`:''}
+  ${bill&&d.referenceType&&d.referenceType!=='NON'?f('reference',t('reference'),d.referenceType==='QRR'?formatQrr(d.reference):d.reference,'maxlength="40" autocomplete="off"'):''}
+  ${bill&&d.invoiceNumber?f('invoiceNumber',t('invoiceNo'),d.invoiceNumber,'maxlength="60"'):''}
+  ${letter?'':`<label class="field"><span>${t('category')}</span><select id="sc-category" data-scf="category">${EXPENSE_CATEGORIES.map(c=>`<option value="${c}" ${d.category===c?'selected':''}>${esc(tt('cat',c))}</option>`).join('')}</select></label>`}
+  <label class="field wide"><span>${letter?t('notesLbl'):t('message')}</span><textarea id="sc-notes" data-scf="${letter?'notes':'message'}" rows="${letter?5:2}" maxlength="${letter?2000:140}">${esc(letter?d.notes:d.message)}</textarea></label>
+  <label class="check wide"><input type="checkbox" id="sc-tax" data-scf="taxRelevant" ${d.taxRelevant?'checked':''}><span>${t('taxRelevant')}<br><small class="muted">${t('taxRelevantHelp')}</small></span></label></div>
+  ${bill?`<fieldset class="panel" style="padding:12px"><legend class="label">${t('budgetLink')}</legend>
+    <label class="check"><input type="radio" name="sc-budget" data-scb="oneoff" ${SC.budget==='oneoff'?'checked':''}><span>${t('blOneoff')}</span></label>
+    ${exp.length?`<label class="check"><input type="radio" name="sc-budget" data-scb="existing" ${SC.budget==='existing'?'checked':''}><span>${t('blExisting')} <select id="sc-exp" data-scf="expenseId" aria-label="${t('blExisting')}">${exp.map(e=>`<option value="${esc(e.id)}" ${SC.expenseId===e.id?'selected':''}>${esc(e.label)} · ${chfc(e.amount)}</option>`).join('')}</select></span></label>`:''}
+    <label class="check"><input type="radio" name="sc-budget" data-scb="none" ${SC.budget==='none'?'checked':''}><span>${t('blNone')}</span></label></fieldset>`:''}
+  ${!remote&&SC.file?.mime==='application/pdf'?`<p class="muted small">${t('localOnlyFile')}</p>`:''}
+  <div class="btns"><button class="btn" data-sc="confirm" ${SC.busy?'disabled':''}>${t('confirmDoc')}</button><button class="btn ghost" data-sc="cancel">${t('cancel')}</button></div></section>
+  ${dupHtml()}${termsHtml(terms)}`;}
+function pickHtml(){return `<section class="panel"><p class="muted">${t('scanIntro')}</p>${SC.busy?`<p class="label">${esc(SC.msg)}</p>`:''}
+  <div class="grid2"><label class="btn" style="text-align:center;cursor:pointer">${t('scanCamera')}<input id="sc-cam" type="file" accept="image/*" capture="environment" data-scfile="1" hidden></label>
+  <label class="btn ghost" style="text-align:center;cursor:pointer">${t('scanUpload')}<input id="sc-up" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" data-scfile="1" hidden></label></div>
+  <details><summary style="cursor:pointer">${t('scanPaste')}</summary><form id="qrTextForm" style="margin-top:10px;display:grid;gap:8px"><label class="field"><span>${t('pasteQrLabel')}</span><textarea id="sc-qrtext" name="qr" rows="6" maxlength="1200" spellcheck="false"></textarea></label><div><button class="btn small" type="submit">${t('readQr')}</button></div></form></details>
+  <div class="btns">${['invoice','receipt','letter'].map(k=>`<button class="btn ghost small" data-sc="manual" data-kind="${k}">${t('scanManual')}: ${t('k_'+k)}</button>`).join('')}</div></section>`;}
+function docItem(d){const late=d.status==='confirmed'&&d.paymentState!=='paid'&&d.dueDate&&d.dueDate<todayISO();const bill=['qrbill','invoice'].includes(d.kind);
+  return `<div class="item">${d.preview?`<img class="thumb" src="${d.preview}" alt="">`:`<div class="thumb">${esc(t('k_'+d.kind))}</div>`}
+  <div style="min-width:0"><strong>${esc(d.creditor||'—')}</strong><div class="muted small num">${d.amount!=null?(d.currency==='EUR'?'EUR '+fromC(d.amount).toFixed(2):chfc(d.amount)):''}${d.dueDate?' · '+t('dueIn',{d:fmtDate(d.dueDate)}):d.documentDate?' · '+fmtDate(d.documentDate):''}</div>
+  <div><span class="tag">${esc(t('k_'+d.kind))}</span>${d.status==='draft'?`<span class="tag warn">${t('draft')}</span>`:''}${bill&&d.status==='confirmed'?(d.paymentState==='paid'?`<span class="tag">${t('paid')}</span>`:`<span class="tag ${late?'bad':'warn'}">${late?t('late2'):t('unpaid')}</span>`):''}${d.taxRelevant?`<span class="tag">${t('inboxTax')}</span>`:''}${(d.terms||[]).map(x=>`<span class="tag ${x.severity==='critical'?'bad':'warn'}">${esc(tt('termSev',x.severity))}</span>`).join('')}</div></div>
+  <div class="btns">${bill&&d.status==='confirmed'?`<button class="btn ghost small" data-sc="paid" data-id="${d.id}" data-paid="${d.paymentState==='paid'?'0':'1'}">${d.paymentState==='paid'?t('markUnpaid'):t('markPaid')}</button>`:''}${remote&&d.fileMime?`<a class="btn ghost small" href="/api/docs/${d.id}/file">${t('download')}</a>`:''}
+  ${pendingDocDel===d.id?`<button class="btn danger small" data-sc="del" data-id="${d.id}">${t('confirmDelete')}</button>`:`<button class="iconbtn" aria-label="${t('remove')}" data-sc="askDel" data-id="${d.id}">×</button>`}</div></div>`;}
+function inboxHtml(){let list=docsList().slice();
+  if(docFold){const [k,v]=docFold.split(':');list=list.filter(d=>k==='cred'?normalizeName(d.creditor)===v:k==='year'?String(d.taxYear)===v:d.taxRelevant);}
+  if(inboxFilter==='open')list=list.filter(d=>d.status==='confirmed'&&d.paymentState!=='paid'&&['qrbill','invoice'].includes(d.kind));
+  if(inboxFilter==='draft')list=list.filter(d=>d.status==='draft');if(inboxFilter==='tax')list=list.filter(d=>d.taxRelevant);
+  list.sort((a,b)=>String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999')));
+  const foldName=docFold?(docFold.startsWith('cred:')?(docsList().find(d=>normalizeName(d.creditor)===docFold.slice(5))?.creditor||''):docFold.startsWith('year:')?docFold.slice(5):t('foldersTax')):'';
+  return `${seg([['all','inboxAll'],['open','inboxOpen'],['draft','inboxDraft'],['tax','inboxTax']],inboxFilter,'inbox')}${docFold?`<div class="btns"><span class="tag">${esc(t('folderActive',{name:foldName}))}</span><button class="link" data-sc="clearFold">${t('clearFolder')}</button></div>`:''}
+  <div class="list">${list.map(docItem).join('')||`<div class="empty withimg">${photo('empty')}<p>${t('noDocs2')}</p></div>`}</div>`;}
+function foldersHtml(){const f=folders(docsList());return `<div class="grid2"><section class="panel"><h3>${t('foldersCred')}</h3>${f.creditors.map(c=>`<button class="btn ghost" style="justify-content:space-between;display:flex" data-sc="fold" data-fold="cred:${esc(c.key)}"><span>${esc(c.name)}</span><span class="small muted">${t('docsCount',{n:c.count})}${c.openAmount?' · '+chfc(c.openAmount)+' '+t('openAmount'):''}</span></button>`).join('')||`<p class="muted">—</p>`}</section>
+  <section class="panel"><h3>${t('foldersYear')}</h3>${f.years.map(y=>`<button class="btn ghost" style="justify-content:space-between;display:flex" data-sc="fold" data-fold="year:${y.year}"><span>${y.year}</span><span class="small muted">${t('docsCount',{n:y.count})}</span></button>`).join('')||`<p class="muted">—</p>`}
+  <h3>${t('foldersTax')}</h3><button class="btn ghost" data-sc="fold" data-fold="tax:1">${t('docsCount',{n:f.taxReview.length})}</button><p class="muted small">${t('taxRelevantHelp')}</p></section></div>`;}
+function viewDocs(){const sub=route.sub||'scan';const SEGS=[['scan','segScan'],['inbox','segInbox'],['folders','segFolders'],['payslip','segPayslip']];
+  if(remote&&!DOCS.loaded){DOCS.loaded=true;loadDocs().then(render);}
+  if(sub==='payslip')return `${pagehead('budget',t('docsTitle'),t('psTitle'))}${seg(SEGS,sub,'sub')}${viewPayslip()}`;
+  const body=sub==='inbox'?inboxHtml():sub==='folders'?foldersHtml():SC.step==='review'?reviewHtml():pickHtml();
+  return `${pagehead('receipts',t('scanTitle'))}${seg(SEGS,sub==='receipts'?'scan':sub,'sub')}${body}`;}
+
+async function confirmScan(){const d={...SC.draft};delete d.dueSuggested;const bill=['qrbill','invoice'].includes(d.kind);
+  if(!d.creditor&&(bill||d.kind==='receipt')){toast(t('required'));return;}
+  if(d.iban&&!validIban(d.iban)){toast(tt('qrErr','invalid_iban'));return;}
+  const budget=bill?{mode:SC.budget,expenseId:SC.budget==='existing'?(SC.expenseId||H().expenses.find(e=>!String(e.id).startsWith('doc_'))?.id):undefined}:{mode:'none'};
+  if(budget.mode==='oneoff'&&(!d.amount||d.currency!=='CHF'||!d.dueDate)){toast(t('dueDate')+' · CHF');return;}
+  SC.busy=true;render();
+  if(remote){try{
+      if(!SC.draftId){const r=await api('/docs',{method:'POST',body:JSON.stringify({document:d,file:SC.file?.b64||undefined})});SC.draftId=r.document.id;}
+      const res=await fetch('/api/docs/'+SC.draftId+'/confirm',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({document:d,budget,acknowledgeDuplicate:SC.ack})});const j=await res.json();
+      if(res.status===409&&j.error==='possible_duplicate'){SC.dups=j.duplicates;SC.busy=false;render();document.getElementById('sc-ack')?.scrollIntoView({block:'center'});return;}
+      if(!res.ok)throw new Error(j.error||'error');
+      if(j.household){S.household=j.household;save();}
+      await loadDocs();toast(t('docSaved'));SC={...SC,step:'pick',busy:false,parse:null,file:null,draft:null,dups:[],draftId:null,msg:''};go('docs:inbox');return;
+    }catch(x){SC.busy=false;render();toast(x.message+(SC.draftId?' · '+t('docDraftKept'):''));return;}}
+  const id=uid(),doc={...d,id,status:'confirmed',taxYear:Number((d.documentDate||d.dueDate||todayISO()).slice(0,4)),paymentState:d.kind==='receipt'?'paid':'unpaid',terms:recognizeTerms([d.creditor,d.message,d.notes].join(' ')),budget,preview:SC.file?.mime==='application/pdf'?null:SC.file?.preview||null};
+  const dups=findDuplicates(doc,S.docs.filter(x=>x.status==='confirmed'));if(dups.some(x=>['same_payment_reference','same_file','same_document'].includes(x.reason))&&!SC.ack){SC.dups=dups;SC.busy=false;render();return;}
+  S.docs.unshift(doc);
+  if(budget.mode==='oneoff')H().expenses.push({id:'doc_'+id,label:d.creditor,category:d.category||'other',amount:d.amount,frequency:'oneoff',month:d.dueDate.slice(0,7),day:Number(d.dueDate.slice(8,10)),status:'confirmed',provider:d.creditor});
+  saveHH();toast(t('docSaved'));SC={...SC,step:'pick',busy:false,parse:null,file:null,draft:null,dups:[],msg:''};go('docs:inbox');}
+
+/* Budget AI */
+function realizedHtml(){const r=realizedSavings(H(),todayISO().slice(0,7));return `<section class="panel"><h3>${t('realizedTitle')}</h3>${r.items.length?`<div class="totals"><div class="big"><span>${esc(r.items.map(x=>x.label).join(', '))}</span><span style="color:var(--good)">${chfc(r.monthly)}/${lang==='fr'?'mois':lang==='en'?'month':'mês'}</span></div><div class="muted small"><span>${t('perYear')}</span><span>${chfc(r.yearly)}</span></div></div>`:`<p class="muted">${t('realizedNone')}</p>`}</section>`;}
+function adviceHtml(){const list=recommendations(H(),todayISO(),{documents:docsList(),max:8});const per=lang==='fr'?'mois':lang==='en'?'month':'mês';
+  const row=(k,v)=>v==null||v===''?'':`<div><span class="muted small">${t(k)}</span><span>${v}</span></div>`;
+  return `<section class="panel"><h2>${t('adviceTitle')}</h2><p class="muted small">${t('adviceIntro')}</p>${list.length?`<ol class="actions">${list.map(r=>`<li><strong>${esc(tt('rec',r.problem,{label:r.label||'',date:fmtDate(r.date),cat:tt('cat',r.category||'other')}))} <span class="tag">${t('priority',{n:r.priority})}</span></strong>
+    <div class="totals" style="margin-top:8px">${row('fCurrent',r.current!=null?chfc(Math.abs(r.current)):'')}${row('fAlt',r.alternative!=null?chfc(r.alternative):'—')}${row('fPotential',r.potentialMonthly!=null?chfc(r.potentialMonthly)+'/'+per:t('unknownSaving'))}${row('fCond',r.conditions?esc(tt('cond',r.conditions)):'—')}${row('fSource',r.source?`<a href="${r.source}" target="_blank" rel="noopener noreferrer">${t('source')} ↗</a>`:'—')}${row('fNext',esc(tt('next',r.nextAction)))}${row('fState',esc(tt('recState',r.state)))}${r.blockers?row('blockers',esc(r.blockers.map(c=>tt('cat',c)).join(', '))):''}</div>
+    <div class="btns"><button class="btn ghost small" data-rec="${r.id}" data-state="in_review">${t('markReview')}</button>${r.rowId?`<button class="btn small" data-sc="recDone" data-row="${esc(r.rowId)}" data-id="${r.id}">${t('doneConfirm')}</button>`:`<button class="btn ghost small" data-rec="${r.id}" data-state="done">${t('markDone')}</button>`}<button class="link" data-rec="${r.id}" data-state="discarded">${t('markDiscard')}</button></div></li>`).join('')}</ol>`:`<p class="muted">${t('noBudget')}</p>`}</section>${realizedHtml()}`;}
+
+/* Guia Suisse */
+function guideLocal(q){const r=searchKb(q,lang);return {items:r.items,noVerifiedSource:r.noVerifiedSource,sources:r.noVerifiedSource?r.officialPortals:[],kbVersion:r.kbVersion,updatedAt:r.updatedAt,needsProfessional:r.items.some(i=>i.needsProfessional),mode:r.noVerifiedSource?'no_verified_source':'reference_guide'};}
+async function askGuide(q){guideQ=q;guideBusy=true;render();let res=null;
+  if(remote){try{res=await api('/guide',{method:'POST',body:JSON.stringify({question:q,locale:lang,...(useAI&&aiConsent?{useAI:true,aiConsent:true,privacyVersion:PRIVACY}:{})})});}catch(x){toast(x.message);}}
+  guideRes=res||guideLocal(q);guideBusy=false;render();document.getElementById('guideRes')?.scrollIntoView({behavior:'smooth',block:'start'});}
+function guideHtml(){const ex=t('guideEx').split('|');const r=guideRes;
+  const items=r?(r.mode==='ai_with_references'?`<section class="panel"><p style="white-space:pre-line">${esc(r.answer)}</p></section>`:'')+(r.items||[]).map(i=>`<section class="panel"><p class="label">${esc(tt('topic',i.topic))} · ${esc(i.canton==='VD'?'Vaud':'CH')}</p><p>${esc(i.text)}</p>
+      <p class="muted small">${t('guideValid',{from:fmtDate(i.validFrom)})}${i.validUntil?t('guideUntil',{to:fmtDate(i.validUntil)}):''}</p>
+      ${i.needsProfessional?`<div class="banner"><span>!</span><span>${t('guidePro')}</span></div>`:''}
+      <p class="small">${i.sources.map(s=>`<a href="${s.url}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a> <span class="muted">(${t('guideChecked',{d:fmtDate(s.checkedAt)})}${s.reviewDue?' · '+t('guideReview'):''})</span>`).join('<br>')}</p></section>`).join(''):'';
+  const none=r&&r.noVerifiedSource?`<section class="panel"><h3>${t('guideNoSrc')}</h3><p>${esc(r.answer||'')}</p><p class="small">${(r.sources||[]).map(s=>`<a href="${s.url}" target="_blank" rel="noopener noreferrer">${esc(s.title)} ↗</a>`).join('<br>')}</p></section>`:'';
+  return `<p class="muted">${t('guideIntro')}</p><section class="panel"><form id="guideForm" style="display:grid;gap:10px"><label class="field"><span>${t('guideAsk')}</span><textarea id="g-q" name="q" rows="3" maxlength="2500">${esc(guideQ)}</textarea></label>
+    ${FEATURES.guideAI?`<label class="check"><input type="checkbox" data-gai="use" ${useAI?'checked':''}><span>${t('guideAI')}</span></label>${useAI?`<label class="check"><input type="checkbox" data-gai="consent" ${aiConsent?'checked':''}><span>${t('guideAIConsent')}</span></label>`:''}`:''}
+    <div class="btns"><button class="btn" type="submit" ${guideBusy?'disabled':''}>${t('guideBtn')}</button></div></form>
+    <div class="btns">${ex.map(q=>`<button class="btn ghost small" data-sc="guideEx" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div></section>
+    <div id="guideRes" style="display:grid;gap:12px">${items}${none}</div>
+    <p class="muted small">${t('guideKb',{v:KB_VERSION,d:fmtDate(KB_UPDATED)})} · ${t('generalInfo')}</p>`;}
+
+/* eventos do scanner, documentos, Budget AI e guia */
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-sc],[data-inbox]');if(!b)return;
+  if(b.dataset.inbox){inboxFilter=b.dataset.inbox;render();return;}
+  const a=b.dataset.sc;
+  if(a==='manual'){SC.file=null;SC.msg='';startReview(blankDraft(b.dataset.kind));return;}
+  if(a==='cancel'){if(remote&&SC.draftId){try{await api('/docs/'+SC.draftId,{method:'DELETE'});await loadDocs();}catch(x){}}SC={...SC,step:'pick',parse:null,file:null,draft:null,dups:[],msg:'',draftId:null};render();return;}
+  if(a==='confirm'){e.preventDefault();await confirmScan();return;}
+  if(a==='fold'){docFold=b.dataset.fold;inboxFilter='all';go('docs:inbox');return;}
+  if(a==='clearFold'){docFold=null;render();return;}
+  if(a==='askDel'){pendingDocDel=b.dataset.id;render();return;}
+  if(a==='del'){const id=b.dataset.id;if(remote){try{await api('/docs/'+id,{method:'DELETE'});const h=await api('/household');if(h.household){S.household=h.household;save();}await loadDocs();}catch(x){toast(x.message);return;}}else{S.docs=S.docs.filter(d=>d.id!==id);H().expenses=H().expenses.filter(x=>x.id!=='doc_'+id);saveHH();}pendingDocDel=null;toast(t('deleted'));render();return;}
+  if(a==='paid'){const id=b.dataset.id,paid=b.dataset.paid==='1';if(remote){try{await api('/docs/'+id+'/paid',{method:'POST',body:JSON.stringify({paid})});await loadDocs();}catch(x){toast(x.message);return;}}else{const d=S.docs.find(x=>x.id===id);if(d){d.paymentState=paid?'paid':'unpaid';d.paidAt=paid?todayISO():null;save();}}render();return;}
+  if(a==='recDone'){const row=H().expenses.find(x=>x.id===b.dataset.row);if(row&&row.targetAmount!=null){row.previousAmount=row.amount;row.amount=row.targetAmount;row.targetAmount=null;}H().recommendationStates[b.dataset.id]='done';saveHH();toast(t('saved'));render();return;}
+  if(a==='guideEx'){askGuide(b.dataset.q);return;}
+  if(a==='askGuide'){const e2=KB_BY_ID[b.dataset.q];guideRes=null;go('life:guide');askGuide(e2?(e2.terms.slice(0,3).join(' ')):'');return;}
+});
+document.addEventListener('change',async e=>{const el=e.target;
+  if(el.dataset.scfile){const f=el.files&&el.files[0];el.value='';await handleFile(f);return;}
+  if(el.dataset.scb){SC.budget=el.dataset.scb;if(SC.budget==='existing'&&!SC.expenseId)SC.expenseId=document.getElementById('sc-exp')?.value||'';return;}
+  if(el.dataset.gai){if(el.dataset.gai==='use')useAI=el.checked;else aiConsent=el.checked;render();return;}
+  if(el.dataset.scf){const k=el.dataset.scf;if(k==='ack'){SC.ack=el.checked;return;}if(k==='taxRelevant'){SC.draft.taxRelevant=el.checked;return;}if(k==='expenseId'){SC.expenseId=el.value;return;}
+    if(['kind','currency','referenceType','category'].includes(k)){SC.draft[k]=el.value||null;if(k==='kind'&&!['qrbill','invoice'].includes(el.value))SC.budget='none';render();return;}}
+});
+document.addEventListener('input',e=>{const el=e.target;if(!el.dataset||!el.dataset.scf||!SC.draft)return;const k=el.dataset.scf;
+  if(k==='amount'){SC.draft.amount=el.value.trim()===''?null:cents(el.value);return;}
+  if(['iban','reference'].includes(k)){SC.draft[k]=el.value.replace(/\s+/g,'').toUpperCase();return;}
+  if(['creditor','dueDate','documentDate','message','notes','invoiceNumber'].includes(k)){SC.draft[k]=el.value||(k.endsWith('Date')?null:'');if(k==='dueDate')SC.draft.dueSuggested=false;}
+});
+document.addEventListener('submit',e=>{const f=e.target;
+  if(f.id==='qrTextForm'){e.preventDefault();e.stopImmediatePropagation();const txt=String(new FormData(f).get('qr')||'').trim();const p=parseQrBill(txt);if(!p.data){SC.parse=p;SC.msg=tt('qrErr',p.errors[0]);toast(SC.msg);return;}SC.file=null;startReview(draftFromQr(p),p);}
+  if(f.id==='guideForm'){e.preventDefault();e.stopImmediatePropagation();const q=String(new FormData(f).get('q')||'').trim();if(q)askGuide(q);}
+},true);
 
 function render(){
   document.documentElement.lang=lang;document.getElementById('lang').value=lang;
@@ -657,7 +875,7 @@ document.addEventListener('click',async e=>{
   if(b.dataset.tab){go(b.dataset.tab);return;}
   if(b.dataset.scroll&&route.tab==='home'&&!b.dataset.go){document.getElementById(b.dataset.scroll)?.scrollIntoView({behavior:'smooth',block:'start'});return;}
   if(b.dataset.go){const sc=b.dataset.scroll;go(b.dataset.go);if(sc)setTimeout(()=>document.getElementById(sc)?.scrollIntoView({behavior:'smooth',block:'start'}),60);return;}
-  if(b.dataset.sub){route.sub=b.dataset.sub;pendingDelete=null;render();return;}
+  if(b.dataset.sub){route.sub=b.dataset.sub;pendingDelete=null;try{history.replaceState(null,'','#'+route.tab+':'+route.sub);}catch(x){}render();return;}
   if(b.dataset.filter){docFilter=b.dataset.filter;render();return;}
   if(b.dataset.product){product=b.dataset.product;render();return;}
   if(b.dataset.ob){const n=b.dataset.ob;if(n==='finish'){H().onboarding={step:'plan',completed:true};saveHH();go('home');return;}H().onboarding.step=n;saveHH();render();window.scrollTo({top:0});return;}
@@ -682,7 +900,7 @@ document.addEventListener('click',async e=>{
   if(a==='json'){let data=S;if(remote){try{data={account:await api('/export'),device:S};}catch(x){}}download('privefinances-dados.json',JSON.stringify(data,null,2),'application/json');}
   if(a==='ics')icsExport();
   if(a==='remindLetter'){S.reminders.push({id:uid(),label:(LETTERS[lang][letterResult?.type||letterType]||[''])[0]||t('reminder'),date:b.dataset.date});save();toast(t('reminderAdded'));}
-  if(a==='savePayslip'){const d=S.payslipDraft;if(!d)return;S.payslips.push({...d});const sal=salaryRow();if(sal){sal.amount=cents(d.net);sal.status='confirmed';}else H().incomes.unshift({id:uid(),label:lang==='fr'?'Salaire net':'Salário líquido',type:'salary',amount:cents(d.net),frequency:'monthly',day:25,status:'confirmed'});saveHH();toast(t('psSaved'));render();}
+  if(a==='savePayslip'){const d=S.payslipDraft;if(!d)return;S.payslips.push({...d});const sal=salaryRow();if(sal){sal.amount=cents(d.net);sal.status='confirmed';}else H().incomes.unshift({id:uid(),label:lang==='fr'?'Salaire net':lang==='en'?'Net salary':'Salário líquido',type:'salary',amount:cents(d.net),frequency:'monthly',day:25,status:'confirmed'});saveHH();toast(t('psSaved'));render();}
   if(a==='askWipe'){pendingDelete='ALL';render();}
   if(a==='wipe'){if(remote){try{await api('/account',{method:'DELETE',body:JSON.stringify({confirm:'DELETE'})});}catch(x){toast(x.message);return;}}try{localStorage.removeItem(KEY);}catch(e){}S=blank();S.lang=lang;S.household=blankHH();pendingDelete=null;toast(t('allDeleted'));go('home');}
 });
@@ -694,7 +912,7 @@ document.addEventListener('input',e=>{
   if(el.dataset.fam){H().family[el.dataset.fam]=el.dataset.fam==='otherContributions'?cents(el.value):Math.max(0,parseInt(el.value)||0);saveHH();return;}
   if(el.dataset.goal){H().goal=H().goal||{monthly:0,label:''};H().goal[el.dataset.goal]=el.dataset.goal==='monthly'?cents(el.value):el.value;saveHH();return;}
   if(el.dataset.open){H().openingBalance=el.value.trim()===''?null:{amount:cents(el.value),confirmed:true,date:todayISO()};saveHH();return;}
-  if(el.dataset.sal&&el.type!=='checkbox'){let s=salaryRow();if(!s){s={id:uid(),label:lang==='fr'?'Salaire net':'Salário líquido',type:'salary',amount:0,frequency:'monthly',day:25,status:'estimated'};H().incomes.unshift(s);}if(el.dataset.sal==='amount')s.amount=cents(el.value);else s.day=Math.min(31,Math.max(1,parseInt(el.value)||25));saveHH();return;}
+  if(el.dataset.sal&&el.type!=='checkbox'){let s=salaryRow();if(!s){s={id:uid(),label:lang==='fr'?'Salaire net':lang==='en'?'Net salary':'Salário líquido',type:'salary',amount:0,frequency:'monthly',day:25,status:'estimated'};H().incomes.unshift(s);}if(el.dataset.sal==='amount')s.amount=cents(el.value);else s.day=Math.min(31,Math.max(1,parseInt(el.value)||25));saveHH();return;}
   const r=el.closest&&el.closest('.row');
   if(r&&el.dataset.f){const item=S.budget[r.dataset.kind].find(x=>x.id===r.dataset.id);if(item){item[el.dataset.f]=el.value;save();const tot=document.getElementById('totals');if(tot)tot.outerHTML=totalsHtml();}return;}
   if(el.dataset.in){S.install=Object.assign({principal:30000,down:3000,rate:5.9,months:48,residual:12000,premium:1200,fees:0},S.install||{});S.install[el.dataset.in]=el.value;save();clearTimeout(window._it);window._it=setTimeout(()=>{const id=el.id,pos=el.selectionStart;render();const n=document.getElementById(id);if(n){n.focus();try{n.setSelectionRange(pos,pos);}catch(x){}}},450);return;}
@@ -711,7 +929,7 @@ document.addEventListener('change',e=>{
   const el=e.target;
   if(el.id==='lang'||el.dataset.setlangSelect){lang=el.value;S.lang=lang;saveHH();render();return;}
   if(el.closest&&el.closest('.hrow')&&el.tagName==='SELECT'){render();return;}
-  if(el.dataset.sal&&el.type==='checkbox'){let s=salaryRow();if(!s){s={id:uid(),label:lang==='fr'?'Salaire net':'Salário líquido',type:'salary',amount:0,frequency:'monthly',day:25,status:'estimated'};H().incomes.unshift(s);}if(el.dataset.sal==='thirteenth')s.thirteenth=el.checked;else s.status=el.checked?'confirmed':'estimated';saveHH();return;}
+  if(el.dataset.sal&&el.type==='checkbox'){let s=salaryRow();if(!s){s={id:uid(),label:lang==='fr'?'Salaire net':lang==='en'?'Net salary':'Salário líquido',type:'salary',amount:0,frequency:'monthly',day:25,status:'estimated'};H().incomes.unshift(s);}if(el.dataset.sal==='thirteenth')s.thirteenth=el.checked;else s.status=el.checked?'confirmed':'estimated';saveHH();return;}
   if(el.dataset.p3==='hasLpp'){S.pillar.hasLpp=el.value;save();render();return;}
   if(el.dataset.debt){debtStage=el.value;render();return;}
   if(el.dataset.letter){letterType=el.value;render();return;}
@@ -732,6 +950,7 @@ document.addEventListener('submit',async e=>{
 });
 
 /* ---------- Início ---------- */
-const startTab=(location.hash||'').slice(1);if(TABS.some(([id])=>id===startTab))route.tab=startTab;
+const [startTab,startSub]=(location.hash||'').slice(1).split(':');if(TABS.some(([id])=>id===startTab)){route.tab=startTab;route.sub=startSub||null;}
+window.addEventListener('hashchange',()=>{const h=(location.hash||'').slice(1).split(':');if(TABS.some(([id])=>id===h[0])&&(route.tab!==h[0]||(h[1]&&route.sub!==h[1]))){route={tab:h[0],sub:h[1]||null};render();}});
 render();connect();
 if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});

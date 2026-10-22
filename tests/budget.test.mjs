@@ -122,3 +122,27 @@ test('API: salva cifrado, devolve visão geral, guarda histórico, exporta e iso
   env.db.prepare("UPDATE households SET user_id='other'").run();
   assert.equal((await (await req(env, '/api/household')).json()).household, null);
 });
+
+test('Budget AI: aumento de custo, conta recorrente fora do orçamento, meta bloqueada e economia realizada só após confirmação', async () => {
+  const {realizedSavings} = await import('../src/budget-engine.mjs');
+  const h = base();
+  h.goal = {monthly: 400000};
+  const docs = [
+    {id: 'a', kind: 'qrbill', status: 'confirmed', creditor: 'Romande Energie SA', amount: 15000, currency: 'CHF', dueDate: '2026-07-30'},
+    {id: 'b', kind: 'qrbill', status: 'confirmed', creditor: 'Romande Energie', amount: 18940, currency: 'CHF', dueDate: '2026-10-30'},
+    {id: 'c', kind: 'qrbill', status: 'draft', creditor: 'Romande Energie', amount: 99999, currency: 'CHF', dueDate: '2026-11-30'}
+  ];
+  const r = recommendations(h, '2026-10-22', {documents: docs, max: 20});
+  const inc = r.find(x => x.problem === 'cost_increased');
+  assert.deepEqual([inc.current, inc.alternative], [18940, 15000]);
+  assert.ok(r.some(x => x.problem === 'recurring_not_in_budget'));
+  const goal = r.find(x => x.id === 'goal_blocked');
+  assert.ok(goal.blockers.length > 0);
+  for (const x of r) for (const k of ['problem', 'current', 'alternative', 'potentialMonthly', 'conditions', 'source', 'nextAction', 'state', 'priority']) assert.ok(k in x, x.id + ' sem ' + k);
+  // a meta sozinha não é economia; nada de economia inventada
+  assert.equal(goal.potentialMonthly, null);
+  assert.equal(realizedSavings(h, '2026-10').monthly, 0);
+  const done = household({...h, expenses: h.expenses.map(e => e.id === 'phone' ? {...e, previousAmount: 6000, amount: 3000, targetAmount: null} : e)});
+  assert.equal(realizedSavings(done, '2026-10').monthly, 3000);
+  assert.equal(realizedSavings(done, '2026-10').yearly, 36000);
+});

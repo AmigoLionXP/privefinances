@@ -131,21 +131,61 @@ const SOURCES = {
   housing: 'https://www.bwo.admin.ch/fr/taux-de-reference',
   budget: 'https://www.budgetberatung.ch'
 };
-export function recommendations(h, today) {
-  const d = diagnosis(h, today), b = d.budget, out = [];
-  const add = (id, impact, ease, data) => out.push({id, impact, ease, state: (h.recommendationStates || {})[id] || 'suggested', ...data});
+const normName = s => String(s || '').normalize('NFKC').toLocaleLowerCase('fr').replace(/[.,;:'"’]/g, ' ').replace(/\b(sa|ag|sàrl|sarl|gmbh|ltd)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** Economias realizadas: só linhas em que o usuário confirmou o novo valor (previousAmount > amount). */
+export function realizedSavings(h, month) {
+  const rows = h.expenses.filter(r => r.previousAmount != null && r.previousAmount > r.amount);
+  const items = rows.map(r => ({id: r.id, label: r.label, category: r.category, before: monthlyEquivalent({...r, amount: r.previousAmount}, month), after: monthlyEquivalent(r, month)}))
+    .map(x => ({...x, monthly: x.before - x.after}));
+  return {monthly: items.reduce((s, x) => s + x.monthly, 0), yearly: items.reduce((s, x) => s + x.monthly, 0) * 12, items};
+}
+
+/**
+ * Budget AI (motor de regras, determinístico — não usa modelo de linguagem).
+ * Cada recomendação traz: problema, valor atual, alternativa, economia potencial, condições, fonte,
+ * próxima ação e estado. Nada inventa preços: alternativas e economias vêm só do que o usuário
+ * digitou ou de documentos que ele confirmou.
+ * ctx.documents: documentos confirmados (faturas) para detectar aumentos e contas recorrentes.
+ */
+export function recommendations(h, today, ctx = {}) {
+  const month = today.slice(0, 7), d = diagnosis(h, today), b = d.budget, out = [];
+  const add = (id, impact, ease, data) => out.push({id, impact: Math.round(impact), ease, state: (h.recommendationStates || {})[id] || 'suggested', alternative: null, potentialMonthly: null, conditions: null, source: null, ...data});
   for (const r of h.expenses) {
     if (r.targetAmount != null && r.targetAmount < r.amount) {
-      const saving = monthlyEquivalent({...r, amount: r.amount - r.targetAmount}, today.slice(0, 7));
-      add('compare_' + r.id, saving, 2, {problem: 'user_found_cheaper_option', category: r.category, label: r.label, current: monthlyEquivalent(r, today.slice(0, 7)), alternative: r.targetAmount, potentialMonthly: saving, conditions: r.category === 'lamal' || r.category === 'insurance' ? 'compare_coverage_and_deadlines' : 'check_contract_terms', source: r.category === 'lamal' ? SOURCES.lamal : null, nextAction: 'review_contract'});
+      const saving = monthlyEquivalent({...r, amount: r.amount - r.targetAmount}, month);
+      add('compare_' + r.id, saving, 2, {problem: 'user_found_cheaper_option', category: r.category, label: r.label, rowId: r.id, current: monthlyEquivalent(r, month), alternative: monthlyEquivalent({...r, amount: r.targetAmount}, month), potentialMonthly: saving, conditions: r.category === 'lamal' || r.category === 'insurance' ? 'compare_coverage_and_deadlines' : 'check_contract_terms', source: r.category === 'lamal' ? SOURCES.lamal : null, nextAction: 'review_contract'});
     }
   }
-  if (b.byCategory.lamal) add('lamal_review', b.byCategory.lamal * 0.1, 3, {problem: 'lamal_premium_can_be_compared', category: 'lamal', current: b.byCategory.lamal, alternative: null, potentialMonthly: null, conditions: 'change_by_30_11_letter_must_arrive', source: SOURCES.lamal, nextAction: 'compare_on_priminfo'});
+  if (b.byCategory.lamal) add('lamal_review', b.byCategory.lamal * 0.1, 3, {problem: 'lamal_premium_can_be_compared', category: 'lamal', current: b.byCategory.lamal, conditions: 'change_by_30_11_letter_must_arrive', source: SOURCES.lamal, nextAction: 'compare_on_priminfo'});
   // Sem limiar de renda inventado: só lembramos que o subsídio existe e apontamos os critérios oficiais.
-  if (b.byCategory.lamal) add('lamal_subsidy', b.byCategory.lamal * 0.05, 2, {problem: 'subsidy_may_apply', category: 'lamal', current: b.byCategory.lamal, alternative: null, potentialMonthly: null, conditions: 'official_income_criteria_no_guarantee', source: SOURCES.subsidy, nextAction: 'check_subsidy_conditions'});
-  if ((b.byCategory.housing || 0) > b.income / 3 && b.income > 0) add('rent_reference_rate', (b.byCategory.housing || 0) * 0.03, 3, {problem: 'housing_over_third', category: 'housing', current: b.byCategory.housing, alternative: null, potentialMonthly: null, conditions: 'depends_on_rate_in_lease', source: SOURCES.housing, nextAction: 'check_reference_rate_in_lease'});
-  if (d.projection.negative) add('negative_balance', Math.abs(d.projection.minBalance), 1, {problem: 'negative_balance_30d', category: null, current: d.projection.minBalance, date: d.projection.minDate, alternative: null, potentialMonthly: null, conditions: null, source: SOURCES.budget, nextAction: 'move_flexible_expenses_or_contact_budget_service'});
-  const flex = Object.entries(b.byCategory).filter(([c]) => !ESSENTIAL.has(c)).sort((x, y) => y[1] - x[1])[0];
-  if (flex && flex[1] > 0) add('review_flexible_' + flex[0], flex[1] * 0.15, 1, {problem: 'largest_flexible_expense', category: flex[0], current: flex[1], alternative: null, potentialMonthly: null, conditions: null, source: null, nextAction: 'review_subscriptions_and_habits'});
-  return out.filter(r => r.state !== 'discarded').sort((x, y) => (y.impact / y.ease) - (x.impact / x.ease)).slice(0, 3);
+  if (b.byCategory.lamal) add('lamal_subsidy', b.byCategory.lamal * 0.05, 2, {problem: 'subsidy_may_apply', category: 'lamal', current: b.byCategory.lamal, conditions: 'official_income_criteria_no_guarantee', source: SOURCES.subsidy, nextAction: 'check_subsidy_conditions'});
+  if (b.byCategory.insurance) add('insurance_review', b.byCategory.insurance * 0.05, 3, {problem: 'insurance_can_be_reviewed', category: 'insurance', current: b.byCategory.insurance, conditions: 'check_notice_period_and_coverage', nextAction: 'list_policies_and_notice_dates'});
+  if ((b.byCategory.housing || 0) > b.income / 3 && b.income > 0) add('rent_reference_rate', (b.byCategory.housing || 0) * 0.03, 3, {problem: 'housing_over_third', category: 'housing', current: b.byCategory.housing, conditions: 'depends_on_rate_in_lease', source: SOURCES.housing, nextAction: 'check_reference_rate_in_lease'});
+  if (d.projection.negative) add('negative_balance', Math.abs(d.projection.minBalance) * 2, 1, {problem: 'negative_balance_30d', current: d.projection.minBalance, date: d.projection.minDate, source: SOURCES.budget, nextAction: 'move_flexible_expenses_or_contact_budget_service'});
+  const flexCats = Object.entries(b.byCategory).filter(([c, v]) => !ESSENTIAL.has(c) && v > 0).sort((x, y) => y[1] - x[1]);
+  if (flexCats[0]) add('review_flexible_' + flexCats[0][0], flexCats[0][1] * 0.15, 1, {problem: 'largest_flexible_expense', category: flexCats[0][0], current: flexCats[0][1], nextAction: 'review_subscriptions_and_habits'});
+  const subs = (b.byCategory.telecom || 0) + (b.byCategory.leisure || 0);
+  if (subs > 0 && flexCats[0]?.[0] !== 'leisure' && flexCats[0]?.[0] !== 'telecom') add('review_subscriptions', subs * 0.1, 1, {problem: 'subscriptions_add_up', category: 'telecom', current: subs, nextAction: 'list_and_cancel_unused_subscriptions'});
+  // Meta: mostra o que impede atingir a meta, sem prometer.
+  const g = goalCheck(h, month);
+  if (g.goal && g.gap > 0) {
+    const blockers = []; let sum = 0;
+    for (const [c, v] of flexCats) { if (sum >= g.gap) break; blockers.push(c); sum += v; }
+    add('goal_blocked', g.gap, 2, {problem: 'goal_above_capacity', current: g.capacity, alternative: g.suggested, blockers, conditions: 'adjust_goal_or_reduce_flexible', nextAction: 'adjust_goal_or_reduce_flexible'});
+  }
+  // Documentos confirmados: aumentos de custo e contas recorrentes fora do orçamento.
+  const bills = (ctx.documents || []).filter(x => x.status === 'confirmed' && x.amount && x.currency === 'CHF' && ['qrbill', 'invoice'].includes(x.kind));
+  const byCreditor = new Map();
+  for (const x of bills) { const k = normName(x.creditor); if (!k) continue; (byCreditor.get(k) || byCreditor.set(k, []).get(k)).push(x); }
+  const inBudget = new Set(h.expenses.map(e => normName(e.provider || e.label)));
+  for (const [k, list] of byCreditor) {
+    const sorted = list.slice().sort((x, y) => String(x.dueDate || x.documentDate || x.confirmedAt).localeCompare(String(y.dueDate || y.documentDate || y.confirmedAt)));
+    const last = sorted.at(-1), prev = sorted.at(-2);
+    if (prev && last.amount > prev.amount * 1.05) add('increase_' + k.replace(/[^a-z0-9]+/g, '_').slice(0, 40), last.amount - prev.amount, 2, {problem: 'cost_increased', label: last.creditor, current: last.amount, alternative: prev.amount, conditions: 'compare_bills_check_reason', nextAction: 'ask_creditor_or_compare'});
+    const linked = list.some(x => x.budget?.mode === 'existing');
+    if (list.length >= 2 && !linked && !inBudget.has(k)) add('recurring_' + k.replace(/[^a-z0-9]+/g, '_').slice(0, 40), last.amount, 1, {problem: 'recurring_not_in_budget', label: last.creditor, current: last.amount, conditions: null, nextAction: 'add_as_recurring_expense'});
+  }
+  const max = ctx.max ?? 3;
+  return out.filter(r => r.state !== 'discarded').sort((x, y) => (y.impact / y.ease) - (x.impact / x.ease)).slice(0, max).map((r, i) => ({...r, priority: i + 1}));
 }
