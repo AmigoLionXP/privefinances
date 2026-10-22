@@ -36,7 +36,9 @@ function row(r, kind, ids) {
     essential: r.essential == null ? null : bool(r.essential),
     shared: bool(r.shared),
     provider: typeof r.provider === 'string' ? r.provider.trim().slice(0, 120) : '',
-    targetAmount: r.targetAmount == null ? null : amount(r.targetAmount)
+    targetAmount: r.targetAmount == null ? null : amount(r.targetAmount),
+    // Valor anterior, gravado só quando o usuário confirma um novo valor (economia realizada).
+    previousAmount: r.previousAmount == null ? null : amount(r.previousAmount)
   };
 }
 

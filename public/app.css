@@ -67,7 +67,8 @@ form{display:grid;gap:14px}
 .field>span{font-size:.88rem;font-weight:700}
 .field small{color:var(--muted);font-size:.8rem}
 input,select,textarea{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:11px 12px;min-height:46px}
-input[type=checkbox]{width:22px;height:22px;min-height:0;accent-color:var(--accent);flex:none}
+input[type=checkbox],input[type=radio]{width:22px;height:22px;min-height:0;padding:0;accent-color:var(--accent);flex:none}
+fieldset.panel{margin:0;min-width:0}fieldset.panel .check select{margin-top:6px}
 .check{display:flex;gap:10px;align-items:flex-start;font-size:.92rem}
 .wide{grid-column:1/-1}
 .btns{display:flex;gap:10px;flex-wrap:wrap;align-items:center}

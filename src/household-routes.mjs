@@ -25,6 +25,17 @@ function overview(h, day) {
   };
 }
 
+/** Grava o agregado e um evento de histórico (só contagens), numa transação. */
+export async function writeHousehold(env, userId, next, kind, summary) {
+  const id = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare('INSERT INTO households(user_id,payload) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload,updated_at=CURRENT_TIMESTAMP').bind(userId, await seal(env, next, `household:${userId}`)),
+    env.DB.prepare('INSERT INTO household_events(id,user_id,kind,payload) VALUES(?,?,?,?)').bind(id, userId, kind, await seal(env, summary, `household_event:${userId}:${id}`))
+  ]);
+  return next;
+}
+export {overview, today};
+
 export async function householdRoute(req, env, user) {
   const path = new URL(req.url).pathname, method = req.method;
   if (path === '/api/household' && method === 'GET') {
@@ -34,11 +45,7 @@ export async function householdRoute(req, env, user) {
   if (path === '/api/household' && method === 'PUT') {
     const next = household(await jsonBody(req, 200000));
     const prev = await getHousehold(env, user.id);
-    const id = crypto.randomUUID();
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO households(user_id,payload) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload,updated_at=CURRENT_TIMESTAMP').bind(user.id, await seal(env, next, `household:${user.id}`)),
-      env.DB.prepare('INSERT INTO household_events(id,user_id,kind,payload) VALUES(?,?,?,?)').bind(id, user.id, prev ? 'updated' : 'created', await seal(env, changeSummary(prev, next), `household_event:${user.id}:${id}`))
-    ]);
+    await writeHousehold(env, user.id, next, prev ? 'updated' : 'created', changeSummary(prev, next));
     return json({household: next, overview: overview(next, today(env))});
   }
   if (path === '/api/household/history' && method === 'GET') return json({events: await getHouseholdEvents(env, user.id)});
