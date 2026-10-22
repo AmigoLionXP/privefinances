@@ -1,6 +1,12 @@
 import {open} from './crypto.mjs';
 import {deliver} from './integrations.mjs';
 export async function runJobs(env,now=new Date()){
+ // Retenção: rascunhos de documentos 30 dias, analytics 400 dias, auditoria 24 meses.
+ const ago=d=>new Date(now.getTime()-d*86400000).toISOString().replace('T',' ').slice(0,19);
+ const drafts=await env.DB.prepare("SELECT id,file_key FROM user_documents WHERE status='draft' AND created_at<?").bind(ago(30)).all();
+ for(const d of drafts.results||[]){if(d.file_key)await env.FILES.delete(d.file_key);await env.DB.prepare('DELETE FROM user_documents WHERE id=?').bind(d.id).run();}
+ await env.DB.prepare('DELETE FROM analytics_events WHERE day<?').bind(ago(400).slice(0,10)).run();
+ await env.DB.prepare('DELETE FROM audit_events WHERE created_at<?').bind(ago(730)).run();
  // Recovery: interrupted sends are retried with the same idempotency key. Gateways must deduplicate.
  await env.DB.prepare('DELETE FROM rate_limits WHERE expires<?').bind(Math.floor(now.getTime()/1000)).run();
  if(env.DELIVERY_ENABLED!=='true')return;

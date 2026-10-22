@@ -1,6 +1,6 @@
-const CACHE='privefinances-shell-v6';
+const CACHE='privefinances-shell-v7';
 const IMGS=['hero','lamal','receipts','budget','deadlines','p3a','conquest','debts','experts','tou','profile','empty'].map(k=>'/img/'+k+'.webp');
-const SHELL=['/','/app.css','/app-main.mjs','/budget-engine.mjs','/qrbill.mjs','/documents.mjs','/canton-vd.mjs','/i18n-en.mjs','/vendor/jsqr.min.js','/manifest.webmanifest','/brand/logo.webp','/brand/owl-160.webp','/brand/icon-192.png',...IMGS];
+const SHELL=['/','/app.css','/app-main.mjs','/budget-engine.mjs','/qrbill.mjs','/documents.mjs','/canton-vd.mjs','/i18n-en.mjs','/plans.mjs','/business-engine.mjs','/simulators.mjs','/solutions.mjs','/experiments.mjs','/vendor/jsqr.min.js','/manifest.webmanifest','/brand/logo.webp','/brand/owl-160.webp','/brand/icon-192.png',...IMGS];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('privefinances-')||k.startsWith('impotfacile-'))).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 // Só a casca do app vai para o cache. A API e os dados financeiros nunca ficam offline.

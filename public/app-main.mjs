@@ -4,6 +4,11 @@ import {parseQrBill,validIban,formatIban,formatQrr} from './qrbill.mjs';
 import {findDuplicates,folders,recognizeTerms,normalizeName,DOC_KINDS} from './documents.mjs';
 import {KB,searchKb,KB_VERSION,KB_UPDATED} from './canton-vd.mjs';
 import EN from './i18n-en.mjs';
+import {PLANS,PLAN_ORDER,can,requiredPlan} from './plans.mjs';
+import {summary,cashflow,accountantRows,toCsv,BIZ_EXPENSE_CATEGORIES} from './business-engine.mjs';
+import {creditSimulation} from './simulators.mjs';
+import {NEEDS,solutionLadder} from './solutions.mjs';
+import {variantFor} from './experiments.mjs';
 /* ---------- Dados e armazenamento (modo de teste: tudo fica neste aparelho) ---------- */
 const KEY='privefinances-test-v1';
 const blank=()=>({profile:null,lang:null,budget:{income:[],expenses:[]},receipts:[],reminders:[],checklist:{},leads:[],pillar:{hasLpp:'yes',paid:0,income:0},example:false,guides:{},payslips:[],payslipDraft:null,remit:null,biz:null,lamalCalc:null,rates:null});
@@ -259,7 +264,7 @@ function viewMoney(){
     body=`<p class="muted">${t('installIntro')}</p><p class="tag warn" style="justify-self:start">${t('installDefaults')}</p>${seg([['credit','pCredit'],['leasing','pLeasing'],['insurance','pInsurance']],product,'product')}
     <section class="panel"><div class="fields">${fld('principal','principal',product==='insurance')}${fld('down','down',product==='insurance')}${fld('rate','rate',product==='insurance')}${fld('months','months')}${fld('residual','residual',product!=='leasing')}${fld('premium','premium',product!=='insurance')}${fld('fees','fees')}</div></section>
     <div class="totals"><div class="big" style="border:0;padding:0"><span>${t('monthlyPay')}</span><span>${chf(pay)}</span></div><div><span>${t('totalPaid')}</span><span>${chf(total)}</span></div>${cost!=null?`<div><span>${t('totalCost')}</span><span>${chf(cost)}</span></div>`:''}</div>
-    <div><button class="btn ghost small" data-act="installToBudget" data-pay="${pay.toFixed(2)}">${t('addToBudget')}</button></div>`;}
+    <div><button class="btn ghost small" data-act="installToBudget" data-pay="${pay.toFixed(2)}">${t('addToBudget')}</button></div>${product==='credit'?creditCheckHtml(P,num(f.rate),n,num(f.fees)):''}`;}
   if(sub==='p3'){const c=cap3a(),left=Math.max(0,c-num(S.pillar.paid)),ml=12-today().getMonth();
     body=`<p class="muted">${t('p3Intro')}</p><section class="panel"><div class="fields">
       <label class="field"><span>${t('hasLpp')}</span><select id="p3-lpp" data-p3="hasLpp"><option value="yes" ${S.pillar.hasLpp==='yes'?'selected':''}>${t('yes')}</option><option value="no" ${S.pillar.hasLpp==='no'?'selected':''}>${t('no')}</option></select></label>
@@ -374,10 +379,11 @@ function payslipCheck(p){const g=num(p.gross),avsExp=Math.round(g*0.053*100)/100
 function franchiseCost(prem,fr,costs){const pay=Math.min(costs,fr),rest=Math.max(0,costs-fr);return prem*12+pay+Math.min(rest*0.1,700);}
 function inp(id,lab,val,extra=''){return `<label class="field"><span>${t(lab)}</span><input id="${id}" data-v="${id}" inputmode="decimal" class="num" value="${esc(val??'')}" ${extra}></label>`;}
 
-const LIFESEG=[['guide','segGuide'],['arrive','segArrive'],['letters','segLetters'],['retire','segRetire'],['leave','segLeave'],['glossary','segGlossary'],['debts','segDebts'],['decl','segDecl'],['experts','segExperts']];
+const LIFESEG=[['guide','segGuide'],['solutions','segSolutions'],['arrive','segArrive'],['letters','segLetters'],['retire','segRetire'],['leave','segLeave'],['glossary','segGlossary'],['debts','segDebts'],['decl','segDecl'],['experts','segExperts']];
 function viewLife(){
   const sub=route.sub||'guide';let body='';
   if(sub==='guide')body=guideHtml();
+  if(sub==='solutions')body=solutionsHtml();
   if(['arrive','retire','leave'].includes(sub)){const g=GUIDES[sub][lang],st=S.guides[sub]||{};const n=g.filter((_,i)=>st[i]).length;
     body=`<section class="panel"><div class="btns" style="justify-content:space-between"><strong>${n}/${g.length} ${t('done')}</strong></div><div class="bar"><i style="width:${Math.round(n/g.length*100)}%"></i></div>
     ${g.map(([a,b,src],i)=>`<label class="check" style="align-items:flex-start"><input type="checkbox" id="g-${sub}-${i}" data-guide="${sub}" data-i="${i}" ${st[i]?'checked':''}><span><strong>${esc(a)}</strong><br><span class="muted small">${esc(b)}</span>${src?` <a class="small" href="${src}" target="_blank" rel="noopener noreferrer">${t('officialSource')}</a>`:''}</span></label>`).join('')}
@@ -389,7 +395,7 @@ function viewLife(){
       ${letterResult?`<div style="display:grid;gap:8px">${letterResult.type?`<p><strong>${t('pasteFound')}:</strong> ${esc(L[letterResult.type][0])}</p>`:`<p class="muted">${t('pasteNone')}</p>`}<p><strong>${t('datesFound')}:</strong></p>${letterResult.dates.length?letterResult.dates.map(d=>`<div class="btns"><span class="num">${fmtDate(d)}</span><button class="btn ghost small" data-act="remindLetter" data-date="${d}">${t('remindThis')}</button></div>`).join(''):`<p class="muted small">${t('noDates')}</p>`}</div>`:''}
       <p class="muted small">${t('lettersWarn')}</p></section>`;}
   if(['glossary','debts','decl','experts'].includes(sub)){route.tab='help';return viewHelp();}
-  const hk={guide:'experts',arrive:'profile',letters:'tou',retire:'p3a',leave:'conquest'}[sub];
+  const hk={guide:'experts',solutions:'experts',arrive:'profile',letters:'tou',retire:'p3a',leave:'conquest'}[sub];
   return `${pagehead(hk,t('solutionsTitle'),t('solutionsSub'))}${seg(LIFESEG,sub,'sub')}${body}`;
 }
 
@@ -415,11 +421,7 @@ function viewSend(){if(!rates&&ratesState==='idle'){rates=S.rates||null;loadRate
   ${offers.map(({i,o,rec,cost})=>`<div class="panel" style="padding:14px;gap:10px;${i===bestI?'border-color:var(--accent)':''}"><strong>${t('offer')} ${i+1}${i===bestI?` · <span class="tag">${t('best')}</span>`:''}</strong><div class="fields"><label class="field"><span>${t('provider')}</span><input id="rm-name-${i}" data-off="${i}" data-k="name" value="${esc(o.name)}" maxlength="40"></label>${inp('rm-fee-'+i,'feeChf',o.fee,`data-off="${i}" data-k="fee"`).replace(`data-v="rm-fee-${i}" `,'')}${inp('rm-rate-'+i,'rateOffered',o.rate,`data-off="${i}" data-k="rate"`).replace(`data-v="rm-rate-${i}" `,'')}</div>${rec!=null?`<div class="totals"><div class="big" style="border:0;padding:0"><span>${t('received')}</span><span>${fmt(rec,s.cur)}</span></div>${cost!=null?`<div><span>${t('hiddenCost')}</span><span>${chf(cost)}</span></div>`:''}</div>`:''}</div>`).join('')}
   <p class="muted small">${t('partnerSoon')}</p></section>`;}
 
-function viewBiz(){const b=S.biz||{ytd:'',forecast:'',expenses:'',avs:10,tax:10};const ytd=num(b.ytd),fc=num(b.forecast)||ytd,pr=Math.max(0,fc-num(b.expenses)),res=pr*(num(b.avs)+num(b.tax))/100/12,pc=Math.min(100,Math.round(Math.max(ytd,fc)/100000*100));
-  const st=Math.max(ytd,fc)>=100000?['tvaOver','bad']:Math.max(ytd,fc)>=80000?['tvaNear','warn']:['tvaOk',''];
-  return `<p class="muted">${t('bizIntro')}</p><section class="panel"><div class="fields">${inp('bz-ytd','revenueYtd',b.ytd)}${inp('bz-forecast','revenueForecast',b.forecast)}${inp('bz-expenses','bizExpenses',b.expenses)}${inp('bz-avs','reserveAvs',b.avs)}${inp('bz-tax','reserveTax',b.tax)}</div></section>
-  <section class="panel"><strong>${t('tvaLimit')}</strong><div class="bar"><i style="width:${pc}%;${st[1]==='bad'?'background:var(--bad)':st[1]==='warn'?'background:var(--warn)':''}"></i></div><span class="tag ${st[1]}">${t(st[0])}</span> <a class="small" href="${SRC2.tva}" target="_blank" rel="noopener noreferrer">${t('officialSource')}</a></section>
-  <div class="totals"><div><span>${t('profit')}</span><span>${chf(pr)}</span></div><div class="big"><span>${t('monthlyReserve')}</span><span>${chf(res)}</span></div></div><p class="muted small">${t('bizNote')}</p>`;}
+function viewBiz(){return bizView();}
 
 function savingsExtras(){const l=S.lamalCalc||{low:'',high:'',costs:''};const cl=franchiseCost(num(l.low),300,num(l.costs)),ch=franchiseCost(num(l.high),2500,num(l.costs)),ready=num(l.low)>0&&num(l.high)>0;
   return `<section class="panel"><h2>${t('lamalCalcTitle')}</h2><p class="muted small">${t('lamalCalcIntro')} <a href="${SRC2.ofspLamal}" target="_blank" rel="noopener noreferrer">Priminfo ↗</a></p><div class="fields">${inp('lc-low','premiumLow',l.low)}${inp('lc-high','premiumHigh',l.high)}${inp('lc-costs','expectedCosts',l.costs)}</div>
@@ -508,7 +510,7 @@ const H=()=>S.household;
 let remote=false,syncState='off',saveTimer=null;
 async function api(path,opt={}){const r=await fetch('/api'+path,{credentials:'same-origin',...opt,headers:{'Content-Type':'application/json',...(opt.headers||{})}});const ct=r.headers.get('content-type')||'';if(!ct.includes('json'))throw new Error('no_api');const j=await r.json();if(!r.ok)throw new Error(j.error||'error');return j;}
 const clean=h=>JSON.parse(JSON.stringify({...h,incomes:h.incomes.map(({ex,...r})=>r),expenses:h.expenses.map(({ex,...r})=>r)}));
-async function connect(){try{const me=await api('/me');FEATURES=me.features||{};PRIVACY=me.privacyVersion||'';remote=true;syncState='on';const r=await api('/household');if(r.household){const local=H();S.household={...r.household,incomes:r.household.incomes,expenses:r.household.expenses};if(!r.household.onboarding.completed&&local.onboarding.completed)S.household.onboarding=local.onboarding;}save();await loadDocs();render();}catch(e){remote=false;syncState='off';}}
+async function connect(){try{const me=await api('/me');FEATURES=me.features||{};PRIVACY=me.privacyVersion||'';ANALYTICS=!!me.analytics;SEED=me.experimentSeed||'';remote=true;await loadPlan();track('app_open');syncState='on';const r=await api('/household');if(r.household){const local=H();S.household={...r.household,incomes:r.household.incomes,expenses:r.household.expenses};if(!r.household.onboarding.completed&&local.onboarding.completed)S.household.onboarding=local.onboarding;}save();await loadDocs();render();}catch(e){remote=false;syncState='off';}}
 function saveHH(){H().lang=lang;save();if(!remote)return;clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{try{await api('/household',{method:'PUT',body:JSON.stringify(clean(H()))});syncState='on';}catch(e){syncState='fail';toast(t('syncFail'));}},700);}
 
 /* ----- cálculos com o motor compartilhado ----- */
@@ -603,7 +605,7 @@ function viewProfile(){const h=H();return `${pagehead('profile',t('profileTitle'
   <section class="panel"><div class="fields"><label class="field"><span>${t('langLbl')}</span><select id="pf-lang" data-setlang-select="1"><option value="pt" ${lang==='pt'?'selected':''}>Português</option><option value="fr" ${lang==='fr'?'selected':''}>Français</option><option value="en" ${lang==='en'?'selected':''}>English</option></select></label>
   <div class="field"><span>${t('commune')}</span><strong>${esc(h.profile.commune||'—')}</strong></div></div><div><button class="btn ghost" data-act="redoOnboard">${t('editOnboard')}</button></div><p class="muted small">${remote?t('syncOn'):t('syncOff')}</p></section>
   <section class="panel"><h3>${t('segPrivacy')}</h3><p class="muted">${remote?'':t('privIntro')}</p><div class="btns"><button class="btn ghost" data-act="json">${t('downloadJson')}</button>${pendingDelete==='ALL'?`<button class="btn danger" data-act="wipe">${t('confirmDeleteAll')}</button>`:`<button class="btn danger" data-act="askWipe">${t('deleteAll')}</button>`}</div></section>
-  <section class="panel"><h3>${t('planTitle')}</h3><p><strong>${t('planFree')}</strong></p><p class="muted small">${t('planInfo')}</p></section>`;}
+  ${planHtml()}${analyticsHtml()}${referralsHtml()}`;}
 
 /* ---------- v5: scanner QR/PDF, documentos, pastas, Budget AI e Guia Suisse ---------- */
 T.en=EN.T;GLOSS.en=EN.GLOSS;DEBTS.en=EN.DEBTS;ALT.en=EN.ALT;STORIES.en=EN.STORIES;ACT.en=EN.ACT;for(const k of Object.keys(GUIDES))GUIDES[k].en=EN.GUIDES[k];LETTERS.en=EN.LETTERS;
@@ -775,7 +777,7 @@ async function confirmScan(){const d={...SC.draft};delete d.dueSuggested;const b
       if(!res.ok)throw new Error(j.error||'error');
       if(j.household){S.household=j.household;save();}
       await loadDocs();toast(t('docSaved'));SC={...SC,step:'pick',busy:false,parse:null,file:null,draft:null,dups:[],draftId:null,msg:''};go('docs:inbox');return;
-    }catch(x){SC.busy=false;render();toast(x.message+(SC.draftId?' · '+t('docDraftKept'):''));return;}}
+    }catch(x){SC.busy=false;render();toast(x.message==='plan_limit_documents'?t('limitDocs'):x.message+(SC.draftId?' · '+t('docDraftKept'):''));return;}}
   const id=uid(),doc={...d,id,status:'confirmed',taxYear:Number((d.documentDate||d.dueDate||todayISO()).slice(0,4)),paymentState:d.kind==='receipt'?'paid':'unpaid',terms:recognizeTerms([d.creditor,d.message,d.notes].join(' ')),budget,preview:SC.file?.mime==='application/pdf'?null:SC.file?.preview||null};
   const dups=findDuplicates(doc,S.docs.filter(x=>x.status==='confirmed'));if(dups.some(x=>['same_payment_reference','same_file','same_document'].includes(x.reason))&&!SC.ack){SC.dups=dups;SC.busy=false;render();return;}
   S.docs.unshift(doc);
@@ -784,11 +786,11 @@ async function confirmScan(){const d={...SC.draft};delete d.dueSuggested;const b
 
 /* Budget AI */
 function realizedHtml(){const r=realizedSavings(H(),todayISO().slice(0,7));return `<section class="panel"><h3>${t('realizedTitle')}</h3>${r.items.length?`<div class="totals"><div class="big"><span>${esc(r.items.map(x=>x.label).join(', '))}</span><span style="color:var(--good)">${chfc(r.monthly)}/${lang==='fr'?'mois':lang==='en'?'month':'mês'}</span></div><div class="muted small"><span>${t('perYear')}</span><span>${chfc(r.yearly)}</span></div></div>`:`<p class="muted">${t('realizedNone')}</p>`}</section>`;}
-function adviceHtml(){const list=recommendations(H(),todayISO(),{documents:docsList(),max:8});const per=lang==='fr'?'mois':lang==='en'?'month':'mês';
+function adviceHtml(){const all=recommendations(H(),todayISO(),{documents:docsList(),max:8}),full=allowed('budget_ai_full'),list=full?all:all.slice(0,3),lockedN=all.length-list.length;const per=lang==='fr'?'mois':lang==='en'?'month':'mês';
   const row=(k,v)=>v==null||v===''?'':`<div><span class="muted small">${t(k)}</span><span>${v}</span></div>`;
   return `<section class="panel"><h2>${t('adviceTitle')}</h2><p class="muted small">${t('adviceIntro')}</p>${list.length?`<ol class="actions">${list.map(r=>`<li><strong>${esc(tt('rec',r.problem,{label:r.label||'',date:fmtDate(r.date),cat:tt('cat',r.category||'other')}))} <span class="tag">${t('priority',{n:r.priority})}</span></strong>
     <div class="totals" style="margin-top:8px">${row('fCurrent',r.current!=null?chfc(Math.abs(r.current)):'')}${row('fAlt',r.alternative!=null?chfc(r.alternative):'—')}${row('fPotential',r.potentialMonthly!=null?chfc(r.potentialMonthly)+'/'+per:t('unknownSaving'))}${row('fCond',r.conditions?esc(tt('cond',r.conditions)):'—')}${row('fSource',r.source?`<a href="${r.source}" target="_blank" rel="noopener noreferrer">${t('source')} ↗</a>`:'—')}${row('fNext',esc(tt('next',r.nextAction)))}${row('fState',esc(tt('recState',r.state)))}${r.blockers?row('blockers',esc(r.blockers.map(c=>tt('cat',c)).join(', '))):''}</div>
-    <div class="btns"><button class="btn ghost small" data-rec="${r.id}" data-state="in_review">${t('markReview')}</button>${r.rowId?`<button class="btn small" data-sc="recDone" data-row="${esc(r.rowId)}" data-id="${r.id}">${t('doneConfirm')}</button>`:`<button class="btn ghost small" data-rec="${r.id}" data-state="done">${t('markDone')}</button>`}<button class="link" data-rec="${r.id}" data-state="discarded">${t('markDiscard')}</button></div></li>`).join('')}</ol>`:`<p class="muted">${t('noBudget')}</p>`}</section>${realizedHtml()}`;}
+    <div class="btns"><button class="btn ghost small" data-rec="${r.id}" data-state="in_review">${t('markReview')}</button>${r.rowId?`<button class="btn small" data-sc="recDone" data-row="${esc(r.rowId)}" data-id="${r.id}">${t('doneConfirm')}</button>`:`<button class="btn ghost small" data-rec="${r.id}" data-state="done">${t('markDone')}</button>`}<button class="link" data-rec="${r.id}" data-state="discarded">${t('markDiscard')}</button></div></li>`).join('')}</ol>`:`<p class="muted">${t('noBudget')}</p>`}${lockedN>0?`<p class="tag">${esc(t('locked',{n:lockedN}))}</p>`:''}</section>${lockedN>0?paywallHtml('budget_ai_full'):''}${realizedHtml()}`;}
 
 /* Guia Suisse */
 function guideLocal(q){const r=searchKb(q,lang);return {items:r.items,noVerifiedSource:r.noVerifiedSource,sources:r.noVerifiedSource?r.officialPortals:[],kbVersion:r.kbVersion,updatedAt:r.updatedAt,needsProfessional:r.items.some(i=>i.needsProfessional),mode:r.noVerifiedSource?'no_verified_source':'reference_guide'};}
@@ -839,6 +841,169 @@ document.addEventListener('input',e=>{const el=e.target;if(!el.dataset||!el.data
 document.addEventListener('submit',e=>{const f=e.target;
   if(f.id==='qrTextForm'){e.preventDefault();e.stopImmediatePropagation();const txt=String(new FormData(f).get('qr')||'').trim();const p=parseQrBill(txt);if(!p.data){SC.parse=p;SC.msg=tt('qrErr',p.errors[0]);toast(SC.msg);return;}SC.file=null;startReview(draftFromQr(p),p);}
   if(f.id==='guideForm'){e.preventDefault();e.stopImmediatePropagation();const q=String(new FormData(f).get('q')||'').trim();if(q)askGuide(q);}
+},true);
+
+/* ---------- v6: planos (sem cobrança), Meu Negócio, simulações, soluções/parceiros, analytics com consentimento ---------- */
+const P3={pt:{
+planTitle2:'Seu plano',planCur:'Plano atual: {p}',planStatus:{free:'gratuito',pilot:'piloto, sem cobrança',active:'ativo',canceled:'cancelado'},pl_essential:'Essencial',pl_plus:'Privé Plus',pl_business:'Privé Business',perMonth2:'/mês',priceHyp:'Preço em teste: nenhuma cobrança na fase piloto.',
+plFeat:{essential:'Orçamento, vencimentos, diagnóstico, guia oficial, alertas críticos, 20 documentos',plus:'Tudo do Essencial + Budget AI completo, arquivo ilimitado, pastas fiscais, simulações com o seu orçamento',business:'Tudo do Plus + Meu Negócio: faturas emitidas, despesas, provisões, fluxo de caixa e pacote para o contador'},
+activatePilot:'Ativar no piloto (sem cobrança)',cancelPlan:'Cancelar o plano',planCanceled:'Plano cancelado. Seus dados continuam disponíveis e exportáveis.',planActivated:'Plano ativado no piloto, sem cobrança.',localAll:'Modo de teste sem conta: todos os recursos ficam liberados neste aparelho.',
+analyticsTitle:'Estatísticas de uso (opcional)',analyticsText:'Ajude a melhorar o app enviando eventos anônimos de uso (ex.: “fatura registrada”). Nunca valores, nomes ou documentos. Você pode retirar a qualquer momento — os eventos já enviados são apagados.',analyticsOn:'Aceito enviar estatísticas anônimas',
+refTitle:'Meus encaminhamentos',refNone:'Nenhum encaminhamento.',refRevoke:'Retirar consentimento',refStatus:{pending:'aguardando contato',cancelled:'cancelado',sent:'enviado'},
+paywallB:'Este recurso faz parte do {p}. {benefit}',paywallC:'Com o {p} você também:',paywallBtn:'Ver planos',locked:'+{n} recomendações no Privé Plus',limitDocs:'O plano Essencial guarda até 20 documentos. Os que você já tem continuam acessíveis.',
+benefit:{business_module:'Veja quanto separar para AVS e impostos e quem ainda te deve.',budget_ai_full:'Descubra todas as despesas que merecem revisão.',simulations_advanced:'Teste um crédito contra o seu orçamento real antes de assinar.',scanner_unlimited:'Guarde todas as suas faturas e recibos, organizados por ano.'},
+bizTitle:'Meu Negócio',bizIntro2:'Para quem trabalha por conta própria: faturas emitidas, despesas, provisões e fluxo de caixa. Tudo estimado — a contribuição real é fixada pela sua caisse AVS e o imposto pela administração fiscal.',
+bInvoiced:'Faturado no ano',bPaid:'Recebido',bOutstanding:'A receber',bExpenses:'Despesas',bProfit:'Resultado (recebido − despesas)',bOverdue:'Faturas atrasadas',bProvisions:'Provisões estimadas',bAvs:'AVS/AI/APG (estimativa prudente)',bTax:'Impostos (taxa que você definiu)',bMonthly:'Separar por mês',bTaxRate:'Taxa para provisão de impostos (%)',bTaxRateHelp:'Defina com seu contador ou pela simulação oficial; o app não inventa essa taxa.',bVatReg:'Já sou registrado na TVA',
+avsMethod:{no_profit:'Sem lucro até agora',minimum_contribution:'Contribuição mínima legal (renda abaixo de CHF 10 100)',full_rate:'Taxa cheia de 10 % (renda a partir de CHF 60 500)',upper_bound_reduced_scale_may_apply:'Estimativa com 10 %: entre CHF 10 100 e 60 500 a escala reduzida pode dar menos'},
+vatSt:{below:'Abaixo do limite de TVA',approaching:'Perto do limite de CHF 100 000 de faturamento: prepare-se para a TVA',above_threshold:'Faturamento projetado acima de CHF 100 000: verifique a inscrição na TVA',registered:'Registrado na TVA'},
+cf90:'Fluxo de caixa, próximas 13 semanas (recebíveis − provisões)',newInvoice:'Nova fatura emitida',client:'Cliente',issueDate:'Emissão',st_draft:'Rascunho',st_sent:'Enviada',st_paid:'Paga',newBizExp:'Nova despesa profissional',receiptKept:'Tenho o comprovante',bcat:{material:'Material',rent:'Aluguel do local',vehicle:'Veículo',phone:'Telefone e internet',insurance:'Seguros',training:'Formação',software:'Software',other:'Outros'},
+exportAcc:'Pacote para o contador (CSV)',addRow:'Adicionar',bizSources:'Fontes',
+credTitle:'Teste do crédito com o seu orçamento',credMax:'A taxa informada passa do máximo legal de {m} % ao ano para este tipo de crédito.',cred36:'A lei avalia a capacidade como se o crédito fosse pago em 36 meses: parcela de {p}.',credAfford:{ok:'A parcela de 36 meses cabe no que sobra do seu orçamento.',tight:'A parcela de 36 meses consome mais de 60 % do que sobra: risco alto.',not_affordable:'A parcela de 36 meses é maior do que sobra no seu orçamento.',no_margin:'Seu orçamento não tem sobra hoje: não assuma novas parcelas.',unknown:'Preencha o orçamento para comparar.'},credNote:'Aproximação: o exame oficial (LCC art. 28) usa o mínimo vital do cantão, o aluguel e os impostos.',
+solTitle:'Soluções',solIntro:'Primeiro o serviço oficial gratuito, depois o que o app resolve, e só então profissionais. A ordem dos parceiros considera adequação, qualidade, transparência e custo — nunca a comissão.',
+need:{lamal_premium:'Pagar menos LAMal',lamal_subsidy:'Subsídio da LAMal',tax_return:'Declaração de impostos',source_tax:'Imposto na fonte / TOU',debts:'Dívidas e cobranças',pillar3a:'Pilar 3a',credit:'Crédito',business_accounting:'Contabilidade do meu negócio'},
+step:{official_free:'Serviço oficial gratuito',in_app:'Resolver no app',comparison:'Comparação informativa',partners:'Profissionais'},openInApp:'Abrir no app',noPartners:'Ainda não há profissionais aprovados para esta necessidade. Comece pelo serviço oficial gratuito.',
+regClass:{information:'Informação',comparison:'Comparação',lead:'Contato com profissional',regulated_advice:'Aconselhamento regulado',intermediation:'Intermediação'},licenceOk:'Habilitação verificada: {a} {n}',commercial:'Relação comercial: {d}',
+refForm:'Pedir contato',shareName:'Nome para contato (opcional, será compartilhado)',shareEmail:'Compartilhar meu e-mail',shareSummary:'Resumo do que preciso (opcional, sem dados sensíveis)',refConsent:'Concordo em compartilhar só o que marquei com este profissional. Posso retirar o consentimento depois.',refSent:'Pedido registrado. O profissional ainda não recebe os dados automaticamente no piloto.',needAccount:'Disponível com conta conectada.'
+},fr:{
+planTitle2:'Votre abonnement',planCur:'Abonnement actuel : {p}',planStatus:{free:'gratuit',pilot:'pilote, sans facturation',active:'actif',canceled:'résilié'},pl_essential:'Essentiel',pl_plus:'Privé Plus',pl_business:'Privé Business',perMonth2:'/mois',priceHyp:'Prix en test : aucune facturation pendant le pilote.',
+plFeat:{essential:'Budget, échéances, diagnostic, guide officiel, alertes critiques, 20 documents',plus:'Tout l’Essentiel + Budget AI complet, archive illimitée, dossiers fiscaux, simulations avec votre budget',business:'Tout le Plus + Mon activité : factures émises, dépenses, provisions, trésorerie et dossier pour la fiduciaire'},
+activatePilot:'Activer en pilote (sans facturation)',cancelPlan:'Résilier l’abonnement',planCanceled:'Abonnement résilié. Vos données restent disponibles et exportables.',planActivated:'Abonnement activé en pilote, sans facturation.',localAll:'Mode test sans compte : toutes les fonctions sont disponibles sur cet appareil.',
+analyticsTitle:'Statistiques d’utilisation (facultatif)',analyticsText:'Aidez à améliorer l’app en envoyant des événements d’utilisation anonymes (ex. « facture enregistrée »). Jamais de montants, noms ou documents. Retrait possible à tout moment — les événements déjà envoyés sont effacés.',analyticsOn:'J’accepte d’envoyer des statistiques anonymes',
+refTitle:'Mes mises en relation',refNone:'Aucune mise en relation.',refRevoke:'Retirer le consentement',refStatus:{pending:'en attente de contact',cancelled:'annulée',sent:'envoyée'},
+paywallB:'Cette fonction fait partie de {p}. {benefit}',paywallC:'Avec {p}, vous pouvez aussi :',paywallBtn:'Voir les abonnements',locked:'+{n} recommandations dans Privé Plus',limitDocs:'L’abonnement Essentiel conserve jusqu’à 20 documents. Ceux que vous avez restent accessibles.',
+benefit:{business_module:'Voyez combien mettre de côté pour l’AVS et les impôts, et qui vous doit encore.',budget_ai_full:'Découvrez toutes les dépenses qui méritent d’être revues.',simulations_advanced:'Testez un crédit avec votre vrai budget avant de signer.',scanner_unlimited:'Conservez toutes vos factures et reçus, classés par année.'},
+bizTitle:'Mon activité',bizIntro2:'Pour les indépendants : factures émises, dépenses, provisions et trésorerie. Tout est estimé — la cotisation réelle est fixée par votre caisse AVS et l’impôt par l’administration fiscale.',
+bInvoiced:'Facturé dans l’année',bPaid:'Encaissé',bOutstanding:'À encaisser',bExpenses:'Dépenses',bProfit:'Résultat (encaissé − dépenses)',bOverdue:'Factures en retard',bProvisions:'Provisions estimées',bAvs:'AVS/AI/APG (estimation prudente)',bTax:'Impôts (taux que vous avez fixé)',bMonthly:'À mettre de côté par mois',bTaxRate:'Taux de provision pour impôts (%)',bTaxRateHelp:'À fixer avec votre fiduciaire ou la simulation officielle ; l’app n’invente pas ce taux.',bVatReg:'Je suis déjà inscrit à la TVA',
+avsMethod:{no_profit:'Pas de bénéfice pour l’instant',minimum_contribution:'Cotisation minimale légale (revenu inférieur à CHF 10 100)',full_rate:'Taux plein de 10 % (revenu dès CHF 60 500)',upper_bound_reduced_scale_may_apply:'Estimation à 10 % : entre CHF 10 100 et 60 500, le barème dégressif peut donner moins'},
+vatSt:{below:'Sous le seuil de TVA',approaching:'Proche du seuil de CHF 100 000 de chiffre d’affaires : préparez-vous à la TVA',above_threshold:'Chiffre d’affaires projeté au-delà de CHF 100 000 : vérifiez l’inscription à la TVA',registered:'Inscrit à la TVA'},
+cf90:'Trésorerie, 13 prochaines semaines (encaissements − provisions)',newInvoice:'Nouvelle facture émise',client:'Client',issueDate:'Émission',st_draft:'Brouillon',st_sent:'Envoyée',st_paid:'Payée',newBizExp:'Nouvelle dépense professionnelle',receiptKept:'J’ai le justificatif',bcat:{material:'Matériel',rent:'Loyer du local',vehicle:'Véhicule',phone:'Téléphone et internet',insurance:'Assurances',training:'Formation',software:'Logiciels',other:'Autres'},
+exportAcc:'Dossier pour la fiduciaire (CSV)',addRow:'Ajouter',bizSources:'Sources',
+credTitle:'Test du crédit avec votre budget',credMax:'Le taux saisi dépasse le maximum légal de {m} % par an pour ce type de crédit.',cred36:'La loi évalue la capacité comme si le crédit était remboursé en 36 mois : mensualité de {p}.',credAfford:{ok:'La mensualité sur 36 mois tient dans ce qui reste de votre budget.',tight:'La mensualité sur 36 mois prend plus de 60 % de ce qui reste : risque élevé.',not_affordable:'La mensualité sur 36 mois dépasse ce qui reste de votre budget.',no_margin:'Votre budget n’a pas de marge aujourd’hui : n’ajoutez pas de mensualités.',unknown:'Remplissez le budget pour comparer.'},credNote:'Approximation : l’examen officiel (LCC art. 28) utilise le minimum vital cantonal, le loyer et les impôts.',
+solTitle:'Solutions',solIntro:'D’abord le service officiel gratuit, ensuite ce que l’app résout, puis seulement les professionnels. L’ordre des partenaires tient compte de l’adéquation, de la qualité, de la transparence et du coût — jamais de la commission.',
+need:{lamal_premium:'Payer moins de LAMal',lamal_subsidy:'Subside LAMal',tax_return:'Déclaration d’impôt',source_tax:'Impôt à la source / TOU',debts:'Dettes et poursuites',pillar3a:'Pilier 3a',credit:'Crédit',business_accounting:'Comptabilité de mon activité'},
+step:{official_free:'Service officiel gratuit',in_app:'Résoudre dans l’app',comparison:'Comparaison informative',partners:'Professionnels'},openInApp:'Ouvrir dans l’app',noPartners:'Aucun professionnel approuvé pour ce besoin pour l’instant. Commencez par le service officiel gratuit.',
+regClass:{information:'Information',comparison:'Comparaison',lead:'Mise en relation',regulated_advice:'Conseil réglementé',intermediation:'Intermédiation'},licenceOk:'Habilitation vérifiée : {a} {n}',commercial:'Relation commerciale : {d}',
+refForm:'Demander un contact',shareName:'Nom pour le contact (facultatif, sera partagé)',shareEmail:'Partager mon e-mail',shareSummary:'Résumé de mon besoin (facultatif, sans données sensibles)',refConsent:'J’accepte de partager uniquement ce que j’ai coché avec ce professionnel. Je peux retirer mon consentement.',refSent:'Demande enregistrée. Pendant le pilote, le professionnel ne reçoit pas encore les données automatiquement.',needAccount:'Disponible avec un compte connecté.'
+},en:{
+planTitle2:'Your plan',planCur:'Current plan: {p}',planStatus:{free:'free',pilot:'pilot, no charge',active:'active',canceled:'cancelled'},pl_essential:'Essential',pl_plus:'Privé Plus',pl_business:'Privé Business',perMonth2:'/month',priceHyp:'Test price: no charge during the pilot.',
+plFeat:{essential:'Budget, deadlines, diagnosis, official guide, critical alerts, 20 documents',plus:'Everything in Essential + full Budget AI, unlimited archive, tax folders, simulations with your budget',business:'Everything in Plus + My business: issued invoices, expenses, provisions, cash flow and an accountant package'},
+activatePilot:'Activate in the pilot (no charge)',cancelPlan:'Cancel the plan',planCanceled:'Plan cancelled. Your data stays available and exportable.',planActivated:'Plan activated in the pilot, no charge.',localAll:'Test mode without an account: all features are available on this device.',
+analyticsTitle:'Usage statistics (optional)',analyticsText:'Help improve the app by sending anonymous usage events (e.g. “bill recorded”). Never amounts, names or documents. You can withdraw at any time — events already sent are deleted.',analyticsOn:'I agree to send anonymous statistics',
+refTitle:'My referrals',refNone:'No referrals.',refRevoke:'Withdraw consent',refStatus:{pending:'awaiting contact',cancelled:'cancelled',sent:'sent'},
+paywallB:'This feature is part of {p}. {benefit}',paywallC:'With {p} you can also:',paywallBtn:'See plans',locked:'+{n} recommendations in Privé Plus',limitDocs:'The Essential plan keeps up to 20 documents. The ones you have stay accessible.',
+benefit:{business_module:'See how much to set aside for AHV and taxes, and who still owes you.',budget_ai_full:'Find every expense worth reviewing.',simulations_advanced:'Test a loan against your real budget before signing.',scanner_unlimited:'Keep all your bills and receipts, sorted by year.'},
+bizTitle:'My business',bizIntro2:'For the self-employed: issued invoices, expenses, provisions and cash flow. Everything is estimated — the real contribution is set by your AHV fund and the tax by the tax authority.',
+bInvoiced:'Invoiced this year',bPaid:'Received',bOutstanding:'To collect',bExpenses:'Expenses',bProfit:'Result (received − expenses)',bOverdue:'Overdue invoices',bProvisions:'Estimated provisions',bAvs:'AHV/IV/EO (prudent estimate)',bTax:'Taxes (rate you set)',bMonthly:'Set aside per month',bTaxRate:'Tax provision rate (%)',bTaxRateHelp:'Set it with your accountant or the official simulation; the app does not invent this rate.',bVatReg:'I am already VAT registered',
+avsMethod:{no_profit:'No profit so far',minimum_contribution:'Legal minimum contribution (income below CHF 10,100)',full_rate:'Full 10% rate (income from CHF 60,500)',upper_bound_reduced_scale_may_apply:'Estimate at 10%: between CHF 10,100 and 60,500 the sliding scale may be lower'},
+vatSt:{below:'Below the VAT threshold',approaching:'Close to the CHF 100,000 turnover threshold: prepare for VAT',above_threshold:'Projected turnover above CHF 100,000: check VAT registration',registered:'VAT registered'},
+cf90:'Cash flow, next 13 weeks (receivables − provisions)',newInvoice:'New issued invoice',client:'Client',issueDate:'Issued',st_draft:'Draft',st_sent:'Sent',st_paid:'Paid',newBizExp:'New business expense',receiptKept:'I have the receipt',bcat:{material:'Materials',rent:'Premises rent',vehicle:'Vehicle',phone:'Phone and internet',insurance:'Insurance',training:'Training',software:'Software',other:'Other'},
+exportAcc:'Accountant package (CSV)',addRow:'Add',bizSources:'Sources',
+credTitle:'Loan test against your budget',credMax:'The rate entered is above the legal maximum of {m}% per year for this type of credit.',cred36:'The law assesses capacity as if the loan were repaid over 36 months: instalment of {p}.',credAfford:{ok:'The 36-month instalment fits in what is left of your budget.',tight:'The 36-month instalment takes more than 60% of what is left: high risk.',not_affordable:'The 36-month instalment is more than what is left in your budget.',no_margin:'Your budget has no margin today: do not take on new instalments.',unknown:'Fill in the budget to compare.'},credNote:'Approximation: the official assessment (LCC art. 28) uses the cantonal subsistence minimum, rent and taxes.',
+solTitle:'Solutions',solIntro:'First the free official service, then what the app solves, and only then professionals. Partner order considers fit, quality, transparency and cost — never commission.',
+need:{lamal_premium:'Pay less for LAMal',lamal_subsidy:'LAMal subsidy',tax_return:'Tax return',source_tax:'Source tax / TOU',debts:'Debts and enforcement',pillar3a:'Pillar 3a',credit:'Credit',business_accounting:'My business accounts'},
+step:{official_free:'Free official service',in_app:'Solve it in the app',comparison:'Informative comparison',partners:'Professionals'},openInApp:'Open in the app',noPartners:'No approved professionals for this need yet. Start with the free official service.',
+regClass:{information:'Information',comparison:'Comparison',lead:'Contact with a professional',regulated_advice:'Regulated advice',intermediation:'Intermediation'},licenceOk:'Licence verified: {a} {n}',commercial:'Commercial relationship: {d}',
+refForm:'Request contact',shareName:'Name for contact (optional, will be shared)',shareEmail:'Share my e-mail',shareSummary:'Summary of what I need (optional, no sensitive data)',refConsent:'I agree to share only what I ticked with this professional. I can withdraw consent later.',refSent:'Request recorded. During the pilot the professional does not yet receive the data automatically.',needAccount:'Available with a connected account.'
+}};
+for(const l of ['pt','fr','en'])Object.assign(T[l],P3[l]);
+T.pt.segSolutions='Soluções';T.fr.segSolutions='Solutions';T.en.segSolutions='Solutions';
+
+let PLAN={plan:'essential',status:'free'},ANALYTICS=false,SEED='',BIZ={data:null,loaded:false,sum:null,cf:null},SOL={need:'lamal_premium',data:null,loading:false},REFS={list:[],loaded:false},exposed={};
+const planNow=()=>remote?PLAN.plan:'business';
+const allowed=f=>can(planNow(),f);
+function track(name,props){if(!remote||!ANALYTICS)return;fetch('/api/events',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,props})}).catch(()=>{});}
+async function loadPlan(){if(!remote)return;try{PLAN=await api('/subscription');}catch(e){}}
+function paywallHtml(feature){const p=requiredPlan(feature),v=variantFor(SEED||'local','upgrade_copy'),pn=t('pl_'+p);
+  if(!exposed[feature]){exposed[feature]=1;track('paywall_view',{feature});track('experiment_exposure',{experiment:'upgrade_copy',variant:v});}
+  return `<section class="panel" style="border-color:var(--accent)">${v==='benefit'?`<p><strong>${esc(t('paywallB',{p:pn,benefit:tt('benefit',feature)}))}</strong></p>`:`<p><strong>${esc(t('paywallC',{p:pn}))}</strong></p><ul style="margin:0;padding-left:20px">${(p==='business'?['business_module','budget_ai_full','simulations_advanced']:['budget_ai_full','scanner_unlimited','simulations_advanced']).map(x=>`<li>${esc(tt('benefit',x))}</li>`).join('')}</ul>`}
+  <p class="muted small">${t('priceHyp')}</p><div><button class="btn" data-go="profile" data-scroll="plans">${t('paywallBtn')}</button></div></section>`;}
+
+/* perfil: planos, estatísticas, encaminhamentos */
+function planHtml(){if(!remote)return `<section class="panel" id="plans"><h3>${t('planTitle2')}</h3><p class="muted">${t('localAll')}</p></section>`;
+  const cur=PLAN.plan,active=['pilot','active'].includes(PLAN.status);
+  return `<section class="panel" id="plans"><h3>${t('planTitle2')}</h3><p>${esc(t('planCur',{p:t('pl_'+cur)}))} · <span class="tag">${esc(tt('planStatus',PLAN.status||'free'))}</span></p>
+  <div class="grid3">${PLAN_ORDER.map(p=>`<div class="stat" style="${p===cur?'border-color:var(--accent)':''}"><strong>${t('pl_'+p)}</strong><span class="num">${PLANS[p].priceMonthly?chfc(PLANS[p].priceMonthly)+t('perMonth2'):'CHF 0'}</span><span class="muted small">${esc(tt('plFeat',p))}</span>${p!=='essential'&&p!==cur?`<button class="btn small" data-p3="activate" data-plan="${p}">${t('activatePilot')}</button>`:''}</div>`).join('')}</div>
+  <p class="muted small">${t('priceHyp')}</p>${active?`<div><button class="btn ghost small" data-p3="cancelPlan">${t('cancelPlan')}</button></div>`:''}</section>`;}
+function analyticsHtml(){if(!remote)return '';return `<section class="panel"><h3>${t('analyticsTitle')}</h3><p class="muted small">${t('analyticsText')}</p><label class="check"><input type="checkbox" data-p3c="analytics" ${ANALYTICS?'checked':''}><span>${t('analyticsOn')}</span></label></section>`;}
+function referralsHtml(){if(!remote)return '';if(!REFS.loaded){REFS.loaded=true;api('/referrals').then(r=>{REFS.list=r.referrals;render();}).catch(()=>{});}
+  return `<section class="panel"><h3>${t('refTitle')}</h3>${REFS.list.length?REFS.list.map(r=>`<div class="btns" style="justify-content:space-between"><span>${esc(r.partner)} · ${esc(tt('need',r.need))} · <span class="tag">${esc(tt('refStatus',r.status))}</span></span>${r.status==='pending'?`<button class="link" data-p3="revokeRef" data-id="${r.id}">${t('refRevoke')}</button>`:''}</div>`).join(''):`<p class="muted">${t('refNone')}</p>`}</section>`;}
+
+/* Meu Negócio */
+const blankBiz=()=>({version:1,settings:{vatRegistered:false,taxProvisionBps:null},invoices:[],expenses:[]});
+function bizData(){return remote?(BIZ.data||blankBiz()):(S.business||(S.business=blankBiz()));}
+async function loadBiz(){if(!remote)return;try{const r=await api('/business');BIZ={data:r.business,loaded:true,sum:r.summary,cf:r.cashflow};}catch(e){BIZ.loaded=true;}render();}
+async function saveBiz(){const b=bizData();if(!remote){save();render();return;}try{const r=await api('/business',{method:'PUT',body:JSON.stringify(b)});BIZ={data:r.business,loaded:true,sum:r.summary,cf:r.cashflow};}catch(x){toast(x.message);}render();}
+function bizView(){if(!allowed('business_module'))return paywallHtml('business_module');
+  if(remote&&!BIZ.loaded){BIZ.loaded=true;loadBiz();return `<p class="muted">…</p>`;}
+  const b=bizData(),d=todayISO(),s=summary(b,d),cf=cashflow(b,d,90,0);
+  const card=(k,v,cls='')=>`<div class="stat"><span class="muted small">${t(k)}</span><strong class="${cls}">${chfc(v)}</strong></div>`;
+  const maxAbs=Math.max(1,...cf.weeks.map(w=>Math.abs(w.balance)));
+  const bars=`<div style="display:flex;gap:4px;align-items:flex-end;height:90px" role="img" aria-label="${t('cf90')}">${cf.weeks.map(w=>`<div title="${fmtDate(w.from)}: ${chfc(w.balance)}" style="flex:1;height:${Math.max(4,Math.round(Math.abs(w.balance)/maxAbs*86))}px;background:var(${w.balance<0?'--bad':'--accent'});border-radius:3px 3px 0 0"></div>`).join('')}</div>`;
+  const invRows=b.invoices.slice().sort((x,y)=>String(y.issueDate).localeCompare(String(x.issueDate))).map(i=>`<div class="item"><div class="thumb">${esc(t('st_'+i.status))}</div><div style="min-width:0"><strong>${esc(i.client)}</strong><div class="muted small num">${chfc(i.amount)} · ${fmtDate(i.issueDate)}${i.dueDate?' → '+fmtDate(i.dueDate):''}</div>${i.status==='sent'&&i.dueDate&&i.dueDate<d?`<span class="tag bad">${t('late2')}</span>`:''}</div>
+    <div class="btns">${i.status!=='paid'?`<button class="btn ghost small" data-p3="invPaid" data-id="${i.id}">${t('st_paid')}</button>`:''}${i.status==='draft'?`<button class="btn ghost small" data-p3="invSent" data-id="${i.id}">${t('st_sent')}</button>`:''}<button class="iconbtn" aria-label="${t('remove')}" data-p3="invDel" data-id="${i.id}">×</button></div></div>`).join('');
+  const expRows2=b.expenses.slice().sort((x,y)=>String(y.date).localeCompare(String(x.date))).slice(0,30).map(e=>`<div class="item"><div class="thumb">${esc(tt('bcat',e.category))}</div><div style="min-width:0"><strong>${esc(e.label)}</strong><div class="muted small num">${chfc(e.amount)} · ${fmtDate(e.date)}${e.receipt?' · ✓':''}</div></div><div class="btns"><button class="iconbtn" aria-label="${t('remove')}" data-p3="expDel" data-id="${e.id}">×</button></div></div>`).join('');
+  return `<p class="muted">${t('bizIntro2')}</p>
+  <div class="grid3">${card('bInvoiced',s.invoiced)}${card('bPaid',s.paid,'pos')}${card('bOutstanding',s.outstanding)}${card('bExpenses',s.expenses)}${card('bProfit',s.profit,s.profit<0?'neg':'')}${card('bMonthly',s.provisions.monthly)}</div>
+  <section class="panel"><h3>${t('bProvisions')}</h3><div class="totals"><div><span>${t('bAvs')}</span><strong>${chfc(s.provisions.avs)}</strong></div><div class="muted small"><span>${esc(tt('avsMethod',s.provisions.avsMethod))}</span><span></span></div>
+    <div><span>${t('bTax')}</span><strong>${s.provisions.tax==null?'—':chfc(s.provisions.tax)}</strong></div></div>
+    <div class="fields"><label class="field"><span>${t('bTaxRate')}</span><input id="bz-taxrate" data-bset="tax" inputmode="decimal" class="num" value="${b.settings.taxProvisionBps==null?'':(b.settings.taxProvisionBps/100)}"><small>${t('bTaxRateHelp')}</small></label>
+    <label class="check"><input type="checkbox" data-bset="vat" ${b.settings.vatRegistered?'checked':''}><span>${t('bVatReg')}</span></label></div>
+    <div class="banner" style="${s.vat==='above_threshold'?'background:var(--bad-bg)':s.vat==='approaching'?'':'background:var(--soft)'}"><span>${s.vat==='above_threshold'?'●':'○'}</span><span>${esc(tt('vatSt',s.vat))}</span></div>
+    <p class="muted small">${t('bizSources')}: <a href="${s.sources.avs.url}" target="_blank" rel="noopener noreferrer">${esc(s.sources.avs.title)} ↗</a> · <a href="${s.sources.vat.url}" target="_blank" rel="noopener noreferrer">${esc(s.sources.vat.title)} ↗</a></p></section>
+  <section class="panel"><h3>${t('cf90')}</h3>${bars}${s.overdue.length?`<p><strong>${t('bOverdue')}:</strong> ${s.overdue.map(o=>`${esc(o.client)} (${chfc(o.amount)}, ${o.days} d)`).join(' · ')}</p>`:''}</section>
+  <section class="panel"><h3>${t('newInvoice')}</h3><form id="bizInvForm"><div class="fields"><label class="field"><span>${t('client')} *</span><input name="client" required maxlength="120"></label><label class="field"><span>${t('amount')} *</span><input name="amount" required inputmode="decimal" class="num"></label>
+    <label class="field"><span>${t('issueDate')}</span><input name="issueDate" type="date" value="${d}" required></label><label class="field"><span>${t('dueDate')}</span><input name="dueDate" type="date"></label>
+    <label class="field"><span>${t('status')}</span><select name="status">${['sent','draft','paid'].map(x=>`<option value="${x}">${t('st_'+x)}</option>`).join('')}</select></label></div><div class="btns"><button class="btn small" type="submit">${t('addRow')}</button></div></form><div class="list">${invRows}</div></section>
+  <section class="panel"><h3>${t('newBizExp')}</h3><form id="bizExpForm"><div class="fields"><label class="field"><span>${t('description')} *</span><input name="label" required maxlength="120"></label><label class="field"><span>${t('amount')} *</span><input name="amount" required inputmode="decimal" class="num"></label>
+    <label class="field"><span>${t('date')}</span><input name="date" type="date" value="${d}" required></label><label class="field"><span>${t('category')}</span><select name="category">${BIZ_EXPENSE_CATEGORIES.map(c=>`<option value="${c}">${esc(tt('bcat',c))}</option>`).join('')}</select></label>
+    <label class="check"><input type="checkbox" name="receipt"><span>${t('receiptKept')}</span></label></div><div class="btns"><button class="btn small" type="submit">${t('addRow')}</button></div></form><div class="list">${expRows2}</div></section>
+  <div class="btns">${remote?`<a class="btn ghost" href="/api/business/accountant.csv?year=${d.slice(0,4)}">${t('exportAcc')}</a>`:`<button class="btn ghost" data-p3="bizCsv">${t('exportAcc')}</button>`}</div>`;}
+
+/* teste do crédito contra o orçamento */
+function creditCheckHtml(principal,ratePct,months,fees){if(!(principal>0)||!(months>0))return '';if(!allowed('simulations_advanced'))return paywallHtml('simulations_advanced');
+  const bal=monthlyBudget(H(),todayISO().slice(0,7)).balance,hasBudget=H().incomes.length>0,r=creditSimulation({principal:cents(principal),rateBps:Math.round(ratePct*100),months,fees:cents(fees)},hasBudget?bal:null);
+  return `<section class="panel"><h3>${t('credTitle')}</h3>${r.warnings.includes('rate_above_legal_max')?`<div class="banner" style="background:var(--bad-bg)"><span>●</span><span>${esc(t('credMax',{m:r.legalMaxBps/100}))}</span></div>`:''}
+  <p>${esc(t('cred36',{p:chfc(r.payment36)}))}</p><div class="banner" style="${r.affordability==='ok'?'background:var(--soft)':r.affordability==='unknown'?'':'background:var(--bad-bg)'}"><span>${r.affordability==='ok'?'✓':'!'}</span><span>${esc(tt('credAfford',r.affordability))}</span></div>
+  <p class="muted small">${t('credNote')} <a href="${r.sources.maxRate.url}" target="_blank" rel="noopener noreferrer">${t('officialSource')} ↗</a> · <a href="${r.sources.lcc28.url}" target="_blank" rel="noopener noreferrer">LCC art. 28 ↗</a></p></section>`;}
+
+/* Soluções / parceiros */
+async function loadSolutions(need){SOL={need,data:null,loading:true};render();if(remote){try{SOL.data=await api('/solutions?need='+need+'&lang='+lang);}catch(e){}}if(!SOL.data)SOL.data=solutionLadder(need,[],{lang});SOL.loading=false;render();}
+function solutionsHtml(){if(!SOL.data&&!SOL.loading)loadSolutions(SOL.need);const d=SOL.data;const lt=o=>o.title[lang]||o.title.pt;
+  const steps=d?d.steps.map((s,ix)=>{let body='';
+    if(s.type==='official_free'||s.type==='comparison')body=s.items.map(o=>`<a href="${o.url}" target="_blank" rel="noopener noreferrer">${esc(lt(o))} ↗</a>`).join('<br>');
+    if(s.type==='in_app')body=`<button class="btn ghost small" data-go="${s.route}">${t('openInApp')}</button>`;
+    if(s.type==='partners')body=!remote?`<p class="muted">${t('needAccount')}</p>`:s.items.length?s.items.map(p=>`<div class="panel" style="padding:12px"><div><strong>${esc(p.name)}</strong> <span class="tag">${esc(tt('regClass',p.regClass))}</span></div>
+      <p class="small muted">${esc(p.services.join(' · '))} · ${esc(p.regions.join(', '))} · ${esc(p.languages.join(', ').toUpperCase())}</p>${p.pricing?.text?`<p class="small">${esc(p.pricing.text)}</p>`:''}
+      ${p.licence?.verifiedAt?`<p class="small">✓ ${esc(t('licenceOk',{a:p.licence.authority,n:p.licence.number}))}</p>`:''}<p class="small"><strong>${esc(t('commercial',{d:p.commercial.disclosure}))}</strong></p>
+      <details><summary style="cursor:pointer">${t('refForm')}</summary><form class="refForm" data-partner="${p.id}" style="display:grid;gap:8px;margin-top:8px"><label class="field"><span>${t('shareName')}</span><input name="name" maxlength="120" autocomplete="name"></label><label class="check"><input type="checkbox" name="email"><span>${t('shareEmail')}</span></label>
+      <label class="field"><span>${t('shareSummary')}</span><textarea name="summary" rows="2" maxlength="500"></textarea></label><label class="check"><input type="checkbox" name="consent" required><span>${t('refConsent')}</span></label><div><button class="btn small" type="submit">${t('refForm')}</button></div></form></details></div>`).join(''):`<p class="muted">${t('noPartners')}</p>`;
+    return `<section class="panel"><h3>${ix+1}. ${esc(tt('step',s.type))}</h3>${body}</section>`;}).join(''):'<p class="muted">…</p>';
+  return `<p class="muted">${t('solIntro')}</p><div class="seg" role="group">${Object.keys(NEEDS).map(n=>`<button type="button" data-need="${n}" aria-pressed="${SOL.need===n}">${esc(tt('need',n))}</button>`).join('')}</div>${steps}`;}
+
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-p3],[data-need]');if(!b)return;
+  if(b.dataset.need){loadSolutions(b.dataset.need);return;}
+  const a=b.dataset.p3;
+  if(a==='activate'){try{PLAN=await api('/subscription',{method:'POST',body:JSON.stringify({plan:b.dataset.plan})});await loadPlan();BIZ.loaded=false;toast(t('planActivated'));}catch(x){toast(x.message);}render();return;}
+  if(a==='cancelPlan'){try{await api('/subscription/cancel',{method:'POST',body:'{}'});await loadPlan();toast(t('planCanceled'));}catch(x){toast(x.message);}render();return;}
+  if(a==='revokeRef'){try{await api('/referrals/'+b.dataset.id,{method:'DELETE'});REFS.loaded=false;}catch(x){toast(x.message);}render();return;}
+  const bz=bizData();
+  if(a==='invPaid'){const i=bz.invoices.find(x=>x.id===b.dataset.id);if(i){i.status='paid';i.paidDate=todayISO();}await saveBiz();return;}
+  if(a==='invSent'){const i=bz.invoices.find(x=>x.id===b.dataset.id);if(i)i.status='sent';await saveBiz();return;}
+  if(a==='invDel'){bz.invoices=bz.invoices.filter(x=>x.id!==b.dataset.id);await saveBiz();return;}
+  if(a==='expDel'){bz.expenses=bz.expenses.filter(x=>x.id!==b.dataset.id);await saveBiz();return;}
+  if(a==='bizCsv'){download('privefinances-contador-'+todayISO().slice(0,4)+'.csv',toCsv(accountantRows(bz,Number(todayISO().slice(0,4)))),'text/csv;charset=utf-8');return;}
+});
+document.addEventListener('change',async e=>{const el=e.target;
+  if(el.dataset.p3c==='analytics'){try{await api('/consents/analytics',{method:'POST',body:JSON.stringify({granted:el.checked,privacyVersion:PRIVACY})});ANALYTICS=el.checked;if(ANALYTICS)track('app_open');}catch(x){toast(x.message);el.checked=!el.checked;}return;}
+  if(el.dataset.bset){const bz=bizData();if(el.dataset.bset==='vat')bz.settings.vatRegistered=el.checked;else{const v=el.value.trim();bz.settings.taxProvisionBps=v===''?null:Math.min(5000,Math.max(0,Math.round(num(v)*100)));}await saveBiz();return;}
+});
+document.addEventListener('submit',async e=>{const f=e.target;
+  if(f.id==='bizInvForm'||f.id==='bizExpForm'){e.preventDefault();e.stopImmediatePropagation();const fd=new FormData(f),bz=bizData(),amt=cents(fd.get('amount'));if(!(amt>0)){toast(t('required'));return;}
+    if(f.id==='bizInvForm'){const st=fd.get('status');bz.invoices.push({id:uid(),client:String(fd.get('client')).trim(),label:'',amount:amt,issueDate:fd.get('issueDate'),dueDate:fd.get('dueDate')||null,status:st,paidDate:st==='paid'?fd.get('issueDate'):null});}
+    else bz.expenses.push({id:uid(),label:String(fd.get('label')).trim(),amount:amt,date:fd.get('date'),category:fd.get('category'),receipt:fd.get('receipt')==='on'});
+    await saveBiz();toast(t('saved'));return;}
+  if(f.classList.contains('refForm')){e.preventDefault();e.stopImmediatePropagation();const fd=new FormData(f);if(!fd.get('consent')){toast(t('required'));return;}
+    try{await api('/referrals',{method:'POST',body:JSON.stringify({partnerId:f.dataset.partner,need:SOL.need,consent:true,privacyVersion:PRIVACY,share:{name:String(fd.get('name')||'').trim()||undefined,email:fd.get('email')==='on',summary:String(fd.get('summary')||'').trim()||undefined}})});REFS.loaded=false;toast(t('refSent'));}catch(x){toast(x.message);}return;}
 },true);
 
 function render(){
