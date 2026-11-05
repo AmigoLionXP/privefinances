@@ -7,4 +7,56 @@ Object.assign(fr,{budgetInputs:'Votre budget mensuel',creditOptional:'Simuler un
 
 Object.assign(fr,{"simulator": "Budget rapide", "intro": "Impôts, assurances et prévoyance : commencez par organiser votre budget.", "detailedBudget": "Budget détaillé", "detailedBudgetNote": "Le salaire net comme base. Ajoutez revenus supplémentaires et charges par catégorie. Les montants annuels deviennent des provisions mensuelles ; les écritures ponctuelles ne comptent que pour le mois choisi.", "planMonth": "Mois du budget", "employer": "Employeur", "netSalary": "Salaire net mensuel CHF", "salaryImportNote": "Confirmez la fiche de salaire dans le scanner puis choisissez « Utiliser comme salaire de base » dans les archives. L’import remplace le salaire de base ; il ne l’ajoute pas une seconde fois.", "otherIncomes": "Autres sources de revenus", "addIncome": "Ajouter un revenu", "expenseRows": "Charges et provisions", "addExpense": "Ajouter une charge", "savePlan": "Enregistrer le budget détaillé", "financialGuide": "Guide financier et app", "guideNote": "Posez vos questions sur l’app, les impôts, les assurances et la prévoyance. Le guide de référence est disponible. Les réponses générées par IA exigent une connexion au fournisseur et utilisent les sources indiquées ; les thèmes juridiques ne sont pas exhaustifs.", "yourQuestion": "Votre question", "guideAIConsent": "Lorsque disponible, j’autorise l’envoi de cette question à Anthropic pour générer une réponse avec références. Un traitement hors d’Europe est possible. N’incluez aucune donnée personnelle réelle dans le pilote.", "askGuide": "Consulter le guide", "savingsGuide": "Guide économies", "savingsNote": "Dans le budget détaillé, saisissez les montants alternatifs obtenus et les frais de changement. Le guide calcule les scénarios et indique les charges à examiner. Aucun changement ou résiliation automatique.", "analyzeSavings": "Analyser mon budget enregistré", "compareAssurances": "Assurances : comparez le coût complet", "coverageNote": "Vérifiez prime, franchise, participation et couverture. Pour la prévoyance, examinez protection, coûts et conditions avant d’interrompre les contributions.", "openPriminfo": "Ouvrir Priminfo, comparateur officiel", "documentArchive": "Archives et paiements", "foldersNote": "Le document est associé au créancier et peut aussi figurer dans le dossier fiscal. Un seul enregistrement, sans double dépense. « À examiner fiscalement » ne signifie pas déduction confirmée.", "folderView": "Vue", "byCreditor": "Dossiers par créancier", "byTaxYear": "Impôts : par année fiscale", "refresh": "Actualiser les archives", "installments": "Simulateur de mensualités", "installmentNote": "Assurances et prévoyance sont prioritaires. Crédit et leasing restent des calculs arithmétiques de soutien. Complétez uniquement les champs utiles au produit choisi.", "product": "Produit", "bankCredit": "Crédit bancaire", "simulationMonths": "Période en mois", "annualPremium": "Assurance : prime annuelle CHF", "monthlyContribution": "Prévoyance : contribution mensuelle CHF", "financedValue": "Crédit/leasing : valeur du bien ou crédit CHF", "upfront": "Apport initial CHF", "nominalRate": "Taux nominal annuel %", "residual": "Leasing : valeur résiduelle / hypothèse de rachat CHF", "fees": "Frais supplémentaires sur la période CHF", "calculateScenario": "Calculer le scénario", "updateCenter": "Mises à jour", "updatesNote": "Révision hebdomadaire des sources et échéances ; révision mensuelle des règles, calculs et améliorations du produit. Les règles fiscales exigent toujours une validation professionnelle.", "documentKind": "Type de document", "invoice": "Facture", "paidReceipt": "Reçu", "payslip": "Fiche de salaire"});
 
-Object.assign(messages.pt.categories,{salary:'Ficha salarial',insurance:'Seguros',tax:'Impostos'});Object.assign(messages.fr.categories,{salary:'Fiche de salaire',insurance:'Assurances',tax:'Impôts'});
+Object.assign(messages.pt.categories,{salary:'Holerite',insurance:'Seguros',tax:'Impostos'});Object.assign(messages.fr.categories,{salary:'Fiche de salaire',insurance:'Assurances',tax:'Impôts'});
+
+// v0.4: onboarding por perfil, navegação em 5 grupos, glossário e textos revisados (manual da marca v1.0).
+Object.assign(fr,{
+navHome:'Accueil',navMoney:'Mon argent',navDocuments:'Documents',navDeadlines:'Délais',navHelp:'Aide',
+intro:'Délais, documents et budget organisés pour celles et ceux qui vivent et travaillent en Suisse, en portugais et en français.',
+validationText:'Version de test : utilisez des données fictives. Budget, justificatifs et délais fonctionnent déjà ; calcul des impôts, lecture automatique et paiements arriveront ensuite.',
+scanTitle:'Vos justificatifs, au même endroit.',
+scanText:'Prenez la photo, saisissez les données et confirmez. Pour l’instant, la saisie est manuelle : rien n’est lu automatiquement.',
+step2Text:'Vérifiez et confirmez chaque document.',
+monthlySpending:'Dépenses mensuelles prévues',
+monthlyIncome:'Ce que vous recevez par mois, après retenues (CHF)',
+monthlyExpenses:'Autres dépenses par mois, hors LAMal et leasing (CHF)',
+lamalMonthly:'Assurance-maladie LAMal par mois (CHF)',
+taxStatus:'Où payez-vous vos impôts ?',
+unlimited:'J’habite dans le canton de Vaud toute l’année',
+limited:'J’habite hors du canton ou à l’étranger',
+departure:'J’ai quitté la Suisse ou le canton cette année',
+pension:'Votre salaire inclut-il une caisse de pension (LPP) ?',
+earned:'Avez-vous un revenu d’activité permettant de cotiser au 3a ?',
+noUnknown:'Non / je ne sais pas',tutorial:'Préparer ma déclaration',
+calculate:'Enregistrer et actualiser le budget',
+payslip:'Fiche de salaire',
+profileEyebrow:'VOTRE PROFIL EN 6 QUESTIONS',
+profileTitle:'Parlez-nous un peu de vous.',
+profileIntro:'Avec 6 réponses, nous affichons les délais et les actions qui peuvent s’appliquer à votre situation. Les réponses restent sur cet appareil et vous pouvez les modifier à tout moment.',
+choose:'Choisir…',
+qPermit:'Quel est votre titre de séjour ?',optPermitL:'Permis L',optPermitB:'Permis B',optPermitC:'Permis C',optSwiss:'Passeport suisse (naturalisé)',optOther:'Autre / je ne sais pas encore',
+qWork:'Comment travaillez-vous ?',optEmployee:'Salarié(e), avec contrat',optIndependent:'Indépendant(e)',optBoth:'Les deux',
+qSourceTax:'Votre fiche de salaire comporte-t-elle une retenue « impôt à la source » ?',optYes:'Oui',optNo:'Non',optUnknown:'Je ne sais pas',
+qHighIncome:'Votre revenu brut annuel dépasse-t-il CHF 120 000 ?',
+qHousehold:'Êtes-vous marié(e) ou en partenariat enregistré ?',
+qPillar3a:'Avez-vous déjà un compte 3a ?',
+profileSave:'Voir mes actions',
+actionsEyebrow:'VOS 3 ACTIONS MAINTENANT',
+actionsTitle:'Ce qui mérite votre attention à cette période de l’année',
+actionsNote:'Orientation générale, avec sources officielles. Vérifiez toujours votre situation : il ne s’agit pas d’un conseil fiscal ou juridique.',
+editProfile:'Modifier mon profil',
+glossaryTitle:'Glossaire : les termes suisses en mots simples',
+gLamal:'Assurance-maladie de base, obligatoire pour toute personne domiciliée en Suisse. Chacun paie une prime mensuelle.',
+gFranchise:'Part des frais médicaux que vous payez avant que l’assurance ne prenne le relais.',
+gSubside:'Aide du canton pour payer la prime LAMal lorsque les revenus sont modestes.',
+gSource:'Impôt retenu directement sur le salaire, fréquent avec un permis L ou B.',
+gTou:'Taxation ordinaire ultérieure : demande pour faire une déclaration complète et faire valoir des déductions. Délai : 31.03 de l’année suivante ; la demande est irrévocable.',
+g3a:'Épargne retraite avec avantage fiscal, dans la limite d’un plafond annuel.',
+gLpp:'Prévoyance professionnelle, retenue sur le salaire.',
+gAvs:'Retraite publique. Les indépendants versent eux-mêmes leurs cotisations.',
+gFiduciaire:'Professionnel ou bureau qui prépare déclarations et comptes.',
+gPoursuite:'Procédure officielle de recouvrement de dette. Les délais peuvent être courts : mieux vaut demander de l’aide tôt.'
+});
+messages.pt.offline='Não foi possível abrir seu espaço agora. Atualize a página ou tente de novo em alguns minutos.';
+messages.fr.offline='Impossible d’ouvrir votre espace pour le moment. Actualisez la page ou réessayez dans quelques minutes.';
+for(const [k,v] of Object.entries({deadline:['Prazo','Délai'],officialSource:['Fonte oficial','Source officielle'],openInApp:['Abrir no app','Ouvrir dans l’app'],profileSaved:['Perfil salvo neste aparelho.','Profil enregistré sur cet appareil.']})){messages.pt[k]=v[0];messages.fr[k]=v[1];}
