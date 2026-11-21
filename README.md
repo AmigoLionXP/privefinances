@@ -42,8 +42,10 @@ npm test
 npm run build
 ```
 
-37 testes JavaScript, validação Python de SQLite/XLSX e paridade entre schema de produção e fixtures. Incluem orçamento anual/pontual, parcelas, vencimento de fontes, consentimento de IA, isolamento de usuários, cifragem, arquivo idempotente por documento, salário sem duplicação e exclusão em cascata. A sessão de navegador local não possui identidade Sites: a gravação é verificada por testes da API, não por um login local. Instalação em celulares e aceite no endereço privado ainda precisam de teste em dispositivos reais.
+45 testes JavaScript, validação Python de SQLite/XLSX e paridade entre schema de produção e fixtures. Incluem orçamento anual/pontual, parcelas, vencimento de fontes, consentimento de IA, isolamento de usuários, cifragem, arquivo idempotente por documento, salário sem duplicação e exclusão em cascata. A sessão de navegador local não possui identidade Sites: a gravação é verificada por testes da API, não por um login local. Instalação em celulares e aceite no endereço privado ainda precisam de teste em dispositivos reais.
 
 Segredos e flags: `DATA_KEYS`, `ACTIVE_DATA_KEY`, `APP_ORIGIN`, `PRIVACY_VERSION`; `AI_ENABLED` para OCR, `GUIDE_AI_ENABLED` para guia, ambos também exigem `ANTHROPIC_API_KEY` e `ANTHROPIC_MODEL`. Manter falsos até configurar contrato, custos, tratamento de dados e testes do provedor. Arquivos `.dev.vars*` são ignorados.
 
 Repositório: https://github.com/AmigoLionXP/privefinances
+
+Revisão do produto 0.3.1: [relatório de 21/11/2026](docs/reviews/2026-11-21-product.md).

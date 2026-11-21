@@ -33,12 +33,12 @@ async function webhook(req,env){
 }
 async function limitedText(req,max){if(!req.body)fail('invalid_webhook');const reader=req.body.getReader();let size=0,parts=[];while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();fail('body_too_large',413);}parts.push(value);}const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);}
 async function route(req,env){const url=new URL(req.url),path=url.pathname,method=req.method;
- if(path==='/api/health')return json({ok:true,version:'0.3.0',productionReady:false});
+ if(path==='/api/health')return json({ok:true,version:'0.3.1',productionReady:false});
  if(path==='/api/stripe/webhook'&&method==='POST')return webhook(req,env);
  if(!path.startsWith('/api/'))return env.ASSETS.fetch(req);
  if(!['GET','HEAD'].includes(method)&&req.headers.get('origin')!==env.APP_ORIGIN&&!(env.ALLOW_LOCAL_DEV==='true'&&['localhost','127.0.0.1'].includes(url.hostname)&&req.headers.get('origin')===url.origin))fail('invalid_origin',403);
  const user=await authenticate(req,env);await limit(env,user.id,'api',300);if(path==='/api/guide')await limit(env,user.id,'guide',15);const organized=await organizerRoute(req,env,user);if(organized)return organized;
- if(path==='/api/me'&&method==='GET')return json({email:user.email,privacyVersion:env.PRIVACY_VERSION,features:{guideAI:env.GUIDE_AI_ENABLED==='true'&&!!env.ANTHROPIC_API_KEY,ai:env.AI_ENABLED==='true',payments:env.PAYMENTS_ENABLED==='true',delivery:env.DELIVERY_ENABLED==='true'}});
+ if(path==='/api/me'&&method==='GET')return json({email:user.email,privacyVersion:env.PRIVACY_VERSION,features:{guideAI:env.GUIDE_AI_ENABLED==='true'&&!!env.ANTHROPIC_API_KEY&&!!env.ANTHROPIC_MODEL,ai:env.AI_ENABLED==='true'&&!!env.ANTHROPIC_API_KEY&&!!env.ANTHROPIC_MODEL,payments:env.PAYMENTS_ENABLED==='true',delivery:env.DELIVERY_ENABLED==='true'}});
  if(path==='/api/dashboard'&&method==='GET'){const p=await getProfile(env,user.id);const rows=await getReceipts(env,user.id);const latest=await env.DB.prepare('SELECT id,payload FROM simulations WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1').bind(user.id).first();const detailed=await getPlan(env,user.id);return json({planSummary:detailed?summarizePlan(detailed):null,profile:p,confirmedReceipts:rows.filter(r=>r.confirmed).length,latest:latest?await open(env,latest.payload,`simulation:${user.id}:${latest.id}`):null});}
  if(path==='/api/profile'&&method==='GET')return json({profile:await getProfile(env,user.id)});
  if(path==='/api/profile'&&method==='PUT'){const p=profile(await jsonBody(req));await env.DB.prepare('INSERT INTO profiles(user_id,payload) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET payload=excluded.payload,updated_at=CURRENT_TIMESTAMP').bind(user.id,await seal(env,p,`profile:${user.id}`)).run();return json({profile:p});}
